@@ -1,0 +1,26 @@
+# PlatformIO / build artifacts
+.pio/
+build/
+.vscode/
+
+# Local runtime captures
+*.brlog
+*.brlog.lock
+capture*.brlog
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp

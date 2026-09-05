@@ -1,0 +1,18 @@
+{
+  "python_files_compiled": 9,
+  "protocol_test": "protocol roundtrip OK",
+  "struct_sizes": {
+    "header": 12,
+    "data": 82,
+    "hello": 32,
+    "health": 52,
+    "sync_req": 12,
+    "sync_resp": 28
+  },
+  "note": "固件 C++ 未在本执行环境完成真实 ESP32/PlatformIO 编译；已做主机协议语法与回环测试。",
+  "firmware_build": "PlatformIO 未安装在当前执行环境，未完成 ESP32-S3 工具链实编译。",
+  "notes": [
+    "已修复发送失败统计重复累加。",
+    "已兼容推荐 USB-UART 环境与可选 ESP32-S3 原生 USB CDC 环境的缓冲区 API 差异。"
+  ]
+}
