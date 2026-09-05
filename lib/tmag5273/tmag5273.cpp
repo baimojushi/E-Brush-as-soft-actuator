@@ -17,36 +17,65 @@ constexpr uint8_t REG_DEVICE_STATUS   = 0x1C;
 bool Tmag5273::begin(TwoWire& wire, uint8_t address, uint8_t conv_avg_code, bool low_noise) {
   wire_ = &wire;
   address_ = address;
+  variant_ = 0;
+  device_id_raw_ = 0;
+  manufacturer_lsb_ = 0;
+  manufacturer_msb_ = 0;
+  last_init_error_ = InitError::NONE;
   delay(3);
 
   if (!verifyIdentity()) return false;
 
-  // 不启用 I2C CRC，便于与通用 I2C 控制器直接互操作。
-  // CONV_AVG=101b -> 32x 平均。
-  if (!writeReg(REG_DEVICE_CONFIG_1, static_cast<uint8_t>((conv_avg_code & 0x07u) << 2))) return false;
+  // CONV_AVG=101b -> 32x 平均；I²C CRC 保持关闭。
+  if (!writeReg(REG_DEVICE_CONFIG_1, static_cast<uint8_t>((conv_avg_code & 0x07u) << 2))) {
+    last_init_error_ = InitError::CONFIG_WRITE;
+    return false;
+  }
 
   // MAG_CH_EN=0111b -> X/Y/Z 全开。
-  if (!writeReg(REG_SENSOR_CONFIG_1, 0x70)) return false;
+  if (!writeReg(REG_SENSOR_CONFIG_1, 0x70)) {
+    last_init_error_ = InitError::CONFIG_WRITE;
+    return false;
+  }
 
-  // A2 默认量程：X/Y/Z ±133 mT。ANGLE/THRESHOLD 全关，保留纯原始磁场语义。
-  if (!writeReg(REG_SENSOR_CONFIG_2, 0x00)) return false;
+  // _RANGE=0：
+  // VER=1 -> ±40 mT；VER=2 -> ±133 mT。
+  // 主机按 DEVICE_ID.VER 选择灵敏度，原始 16-bit 码保持不变。
+  if (!writeReg(REG_SENSOR_CONFIG_2, 0x00)) {
+    last_init_error_ = InitError::CONFIG_WRITE;
+    return false;
+  }
 
-  // 温度通道开启，原始温度码随帧保留。
-  if (!writeReg(REG_T_CONFIG, 0x01)) return false;
+  // 温度通道开启。
+  if (!writeReg(REG_T_CONFIG, 0x01)) {
+    last_init_error_ = InitError::CONFIG_WRITE;
+    return false;
+  }
 
-  // RSLT_INT=1；INT_STATE=0(锁存)；INT_MODE=001b(INT 引脚)。
-  // 锁存中断避免 10 us 脉冲在高负载时漏采；任意有效 I2C 寻址会清除锁存。
-  if (!writeReg(REG_INT_CONFIG_1, 0x84)) return false;
+  // 转换结果中断，锁存，经 INT 引脚输出。
+  if (!writeReg(REG_INT_CONFIG_1, 0x84)) {
+    last_init_error_ = InitError::CONFIG_WRITE;
+    return false;
+  }
 
-  // LP_LN=1(低噪声，可配置)；I2C glitch filter 保持开启；OPERATING_MODE=10b 连续测量。
+  // LP_LN=1(低噪声，可配置)；OPERATING_MODE=10b 连续测量。
   const uint8_t dev_cfg2 = static_cast<uint8_t>((low_noise ? 0x10 : 0x00) | 0x02);
-  if (!writeReg(REG_DEVICE_CONFIG_2, dev_cfg2)) return false;
+  if (!writeReg(REG_DEVICE_CONFIG_2, dev_cfg2)) {
+    last_init_error_ = InitError::CONFIG_WRITE;
+    return false;
+  }
 
-  // 回读关键配置，避免总线瞬态导致“写入成功但状态未生效”。
   uint8_t v = 0;
-  if (!readReg(REG_SENSOR_CONFIG_1, v) || (v & 0xF0u) != 0x70u) return false;
-  if (!readReg(REG_DEVICE_CONFIG_2, v) || (v & 0x03u) != 0x02u) return false;
+  if (!readReg(REG_SENSOR_CONFIG_1, v) || (v & 0xF0u) != 0x70u) {
+    last_init_error_ = InitError::CONFIG_READBACK;
+    return false;
+  }
+  if (!readReg(REG_DEVICE_CONFIG_2, v) || (v & 0x03u) != 0x02u) {
+    last_init_error_ = InitError::CONFIG_READBACK;
+    return false;
+  }
 
+  last_init_error_ = InitError::NONE;
   return true;
 }
 
@@ -54,13 +83,38 @@ bool Tmag5273::verifyIdentity() {
   if (!wire_) return false;
 
   uint8_t lsb = 0, msb = 0, dev = 0;
-  if (!readReg(REG_MANUF_LSB, lsb)) return false;
-  if (!readReg(REG_MANUF_MSB, msb)) return false;
-  if (lsb != 0x49 || msb != 0x54) return false;  // TI manufacturer ID
 
-  if (!readReg(REG_DEVICE_ID, dev)) return false;
+  if (!readReg(REG_MANUF_LSB, lsb)) {
+    last_init_error_ = InitError::MANUFACTURER_LSB_READ;
+    return false;
+  }
+  manufacturer_lsb_ = lsb;
+
+  if (!readReg(REG_MANUF_MSB, msb)) {
+    last_init_error_ = InitError::MANUFACTURER_MSB_READ;
+    return false;
+  }
+  manufacturer_msb_ = msb;
+
+  if (lsb != 0x49 || msb != 0x54) {
+    last_init_error_ = InitError::MANUFACTURER_MISMATCH;
+    return false;
+  }
+
+  if (!readReg(REG_DEVICE_ID, dev)) {
+    last_init_error_ = InitError::DEVICE_ID_READ;
+    return false;
+  }
+  device_id_raw_ = dev;
   variant_ = dev & 0x03u;
-  return variant_ == 1 || variant_ == 2;
+
+  if (variant_ != 1 && variant_ != 2) {
+    last_init_error_ = InitError::DEVICE_VARIANT_INVALID;
+    return false;
+  }
+
+  last_init_error_ = InitError::NONE;
+  return true;
 }
 
 bool Tmag5273::readSample(Sample& out) {
@@ -105,7 +159,11 @@ bool Tmag5273::readBytes(uint8_t start_reg, uint8_t* dst, size_t len) {
   wire_->write(start_reg);
   if (wire_->endTransmission(false) != 0) return false;
 
-  const size_t got = wire_->requestFrom(static_cast<int>(address_), static_cast<int>(len), static_cast<int>(true));
+  const size_t got = wire_->requestFrom(
+      static_cast<int>(address_),
+      static_cast<int>(len),
+      static_cast<int>(true));
+
   if (got != len) {
     while (wire_->available()) (void)wire_->read();
     return false;

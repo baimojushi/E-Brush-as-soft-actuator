@@ -41,6 +41,15 @@ def main():
     print(f"received data frames: {n}, rate={n/dt:.1f} Hz")
     print("hello:", json.dumps(b.latest_hello, ensure_ascii=False, indent=2))
     print("health:", json.dumps(b.latest_health, ensure_ascii=False, indent=2))
+    if b.latest_health and b.latest_health.get("health_schema") == "v1.1":
+        h = b.latest_health
+        print(
+            "i2c scan:",
+            h.get("i2c_scan_addresses_hex"),
+            "hall_addr:", h.get("hall_i2c_address_hex"),
+            "hall_variant:", h.get("hall_variant"),
+            "hall_init:", h.get("hall_init_error_name"),
+        )
     print("host stats:", dict(b.stats))
     print("clock synced:", b.clock.synced, "rtt_ms:", b.clock.last_rtt_ns / 1e6)
     if last:

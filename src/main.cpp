@@ -40,6 +40,25 @@ struct Runtime {
   bool imu_ok = false;
   bool streaming = true;
 
+  // 启动一次性 I²C scan 与 Hall 身份诊断。
+  bool i2c_scan_done = false;
+  uint64_t i2c_scan_bitmap_lo = 0;
+  uint64_t i2c_scan_bitmap_hi = 0;
+  uint32_t i2c_scan_duration_us = 0;
+  uint8_t i2c_scan_count = 0;
+
+  uint8_t hall_i2c_address = 0;
+  uint8_t hall_variant = 0;
+  uint8_t hall_init_error = 0;
+  uint8_t hall_manufacturer_lsb = 0;
+  uint8_t hall_manufacturer_msb = 0;
+  uint8_t hall_device_id = 0;
+
+  uint8_t hall_consecutive_read_errors = 0;
+  uint8_t imu_consecutive_read_errors = 0;
+  uint32_t hall_recoveries = 0;
+  uint32_t imu_recoveries = 0;
+
   uint32_t boot_id = 0;
   uint32_t packet_seq = 0;
   uint32_t frame_id = 0;
@@ -99,7 +118,8 @@ void sendHello() {
   HelloPayload p{};
   p.boot_id = rt.boot_id;
   p.reset_reason = static_cast<uint32_t>(esp_reset_reason());
-  p.capabilities = CAP_HALL_A2 | CAP_IMU_6AXIS | CAP_QUAT_6AXIS | CAP_CLOCK_SYNC | CAP_HEALTH;
+  p.capabilities = CAP_HALL_A2 | CAP_IMU_6AXIS | CAP_QUAT_6AXIS |
+                   CAP_CLOCK_SYNC | CAP_HEALTH | CAP_I2C_SCAN_DIAGNOSTICS;
   p.serial_baud = SERIAL_BAUD;
   p.stream_hz = STREAM_HZ;
 #ifdef BRUSH_FW_VERSION_MAJOR
@@ -129,10 +149,38 @@ void sendHealth() {
   p.imu_reinits = counters.imu_reinits;
   p.free_heap = ESP.getFreeHeap();
   p.min_free_heap = ESP.getMinFreeHeap();
+
+  p.i2c_scan_bitmap_lo = rt.i2c_scan_bitmap_lo;
+  p.i2c_scan_bitmap_hi = rt.i2c_scan_bitmap_hi;
+  p.i2c_scan_duration_us = rt.i2c_scan_duration_us;
+  p.hall_recoveries = rt.hall_recoveries;
+  p.imu_recoveries = rt.imu_recoveries;
+  p.i2c_scan_count = rt.i2c_scan_count;
+  p.i2c_scan_done = rt.i2c_scan_done ? 1 : 0;
+  p.hall_i2c_address = rt.hall_i2c_address;
+  p.hall_variant = rt.hall_variant;
+  p.hall_init_error = rt.hall_init_error;
+  p.hall_manufacturer_lsb = rt.hall_manufacturer_lsb;
+  p.hall_manufacturer_msb = rt.hall_manufacturer_msb;
+  p.hall_device_id = rt.hall_device_id;
+
   (void)serialWritePacket(PacketType::HEALTH, &p, sizeof(p));
 }
 
-void recoverI2CBus() {
+uint64_t ageUs(uint64_t now_us, uint64_t then_us) {
+  if (then_us == 0) return UINT64_MAX;
+  return now_us >= then_us ? now_us - then_us : 0;
+}
+
+bool i2cAddressSeen(uint8_t address) {
+  if (!rt.i2c_scan_done || address > 0x7F) return false;
+  if (address < 0x40) {
+    return (rt.i2c_scan_bitmap_lo & (1ULL << address)) != 0;
+  }
+  return (rt.i2c_scan_bitmap_hi & (1ULL << (address - 0x40))) != 0;
+}
+
+void recoverI2CBus(bool mark_recovery_event) {
   hallWire.end();
 
   pinMode(PIN_HALL_SDA, INPUT_PULLUP);
@@ -140,7 +188,6 @@ void recoverI2CBus() {
   digitalWrite(PIN_HALL_SCL, HIGH);
   delayMicroseconds(5);
 
-  // 若从机在数据位中途掉电，最多 9 个时钟释放 SDA。
   for (int i = 0; i < 9 && digitalRead(PIN_HALL_SDA) == LOW; ++i) {
     digitalWrite(PIN_HALL_SCL, LOW);
     delayMicroseconds(5);
@@ -148,7 +195,7 @@ void recoverI2CBus() {
     delayMicroseconds(5);
   }
 
-  // 生成一个 STOP 条件。
+  // STOP：SDA low -> SCL high -> SDA high。
   pinMode(PIN_HALL_SDA, OUTPUT_OPEN_DRAIN);
   digitalWrite(PIN_HALL_SDA, LOW);
   delayMicroseconds(5);
@@ -159,20 +206,95 @@ void recoverI2CBus() {
 
   hallWire.begin(PIN_HALL_SDA, PIN_HALL_SCL, I2C_HZ);
   hallWire.setTimeOut(8);
-  rt.i2c_recovered_since_last_frame = true;
+  if (mark_recovery_event) rt.i2c_recovered_since_last_frame = true;
 }
 
-bool initHall() {
-  recoverI2CBus();
-  const bool ok = hall.begin(hallWire, HALL_I2C_ADDR, HALL_CONV_AVG_CODE, HALL_LOW_NOISE);
-  if (ok && hall.variant() != HALL_EXPECTED_VARIANT) {
-    return false;
+void runI2CScanOnce() {
+  if (rt.i2c_scan_done) return;
+
+  rt.i2c_scan_bitmap_lo = 0;
+  rt.i2c_scan_bitmap_hi = 0;
+  rt.i2c_scan_count = 0;
+
+  const uint64_t t0 = static_cast<uint64_t>(esp_timer_get_time());
+
+  // 跳过 general-call / CBUS 等最低保留地址；保留 0x78，
+  // 因为 TMAG5273 C1/C2 工厂地址就是 0x78。
+  for (uint16_t addr = 0x08; addr <= 0x7E; ++addr) {
+    hallWire.beginTransmission(static_cast<uint8_t>(addr));
+    const uint8_t err = hallWire.endTransmission(true);
+    if (err == 0) {
+      if (addr < 0x40) {
+        rt.i2c_scan_bitmap_lo |= (1ULL << addr);
+      } else {
+        rt.i2c_scan_bitmap_hi |= (1ULL << (addr - 0x40));
+      }
+      if (rt.i2c_scan_count < 255) ++rt.i2c_scan_count;
+    }
+    delayMicroseconds(30);
   }
+
+  rt.i2c_scan_duration_us =
+      static_cast<uint32_t>(static_cast<uint64_t>(esp_timer_get_time()) - t0);
+  rt.i2c_scan_done = true;
+}
+
+void captureHallIdentityDiagnostics() {
+  rt.hall_variant = hall.variant();
+  rt.hall_manufacturer_lsb = hall.manufacturerLsb();
+  rt.hall_manufacturer_msb = hall.manufacturerMsb();
+  rt.hall_device_id = hall.deviceIdRaw();
+  rt.hall_init_error = static_cast<uint8_t>(hall.lastInitError());
+}
+
+bool tryHallAddress(uint8_t address) {
+  const bool ok = hall.begin(
+      hallWire, address, HALL_CONV_AVG_CODE, HALL_LOW_NOISE);
+  captureHallIdentityDiagnostics();
+
   if (ok) {
+    rt.hall_i2c_address = address;
+    rt.hall_variant = hall.variant();
+    rt.hall_init_error = static_cast<uint8_t>(Tmag5273::InitError::NONE);
+    rt.hall_consecutive_read_errors = 0;
     hallIrqFlag = false;
     rt.hall_time_us = 0;
+    return true;
   }
-  return ok;
+  return false;
+}
+
+bool initHall(bool recover_bus = true) {
+  if (recover_bus) recoverI2CBus(true);
+
+  rt.hall_i2c_address = 0;
+  rt.hall_variant = 0;
+  rt.hall_init_error = 0;
+  rt.hall_manufacturer_lsb = 0;
+  rt.hall_manufacturer_msb = 0;
+  rt.hall_device_id = 0;
+
+  bool any_candidate_ack = false;
+  for (size_t i = 0; i < HALL_I2C_ADDR_CANDIDATE_COUNT; ++i) {
+    any_candidate_ack |= i2cAddressSeen(HALL_I2C_ADDR_CANDIDATES[i]);
+  }
+
+  // 第一遍优先尝试启动扫描中实际 ACK 的 TMAG 工厂地址；
+  // 第二遍再尝试其余候选，覆盖“扫描瞬间设备尚未就绪”的情况。
+  for (uint8_t pass = 0; pass < 2; ++pass) {
+    for (size_t i = 0; i < HALL_I2C_ADDR_CANDIDATE_COUNT; ++i) {
+      const uint8_t addr = HALL_I2C_ADDR_CANDIDATES[i];
+      const bool seen = i2cAddressSeen(addr);
+      if ((pass == 0 && !seen) || (pass == 1 && seen)) continue;
+      if (tryHallAddress(addr)) return true;
+    }
+  }
+
+  if (rt.i2c_scan_done && !any_candidate_ack) {
+    rt.hall_init_error =
+        static_cast<uint8_t>(Tmag5273::InitError::NO_CANDIDATE_ACK);
+  }
+  return false;
 }
 
 bool initImu() {
@@ -191,13 +313,26 @@ bool initImu() {
 void maybeReinitSensors(uint64_t now_us) {
   if (!rt.hall_ok && now_us >= rt.next_hall_reinit_us) {
     ++counters.hall_reinits;
-    rt.hall_ok = initHall();
-    rt.next_hall_reinit_us = now_us + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
+    const bool recovered = initHall(true);
+    rt.hall_ok = recovered;
+    rt.next_hall_reinit_us =
+        now_us + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
+    if (recovered) {
+      ++rt.hall_recoveries;
+      sendHello();
+    }
   }
+
   if (!rt.imu_ok && now_us >= rt.next_imu_reinit_us) {
     ++counters.imu_reinits;
-    rt.imu_ok = initImu();
-    rt.next_imu_reinit_us = now_us + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
+    const bool recovered = initImu();
+    rt.imu_ok = recovered;
+    rt.next_imu_reinit_us =
+        now_us + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
+    if (recovered) {
+      ++rt.imu_recoveries;
+      sendHello();
+    }
   }
 }
 
@@ -235,25 +370,38 @@ void acquireAndSendFrame(uint64_t scheduled_us, bool scheduler_overrun) {
   // 防止单次边沿丢失造成链路永久停顿。
   if (rt.hall_ok) {
     status |= STATUS_HALL_PRESENT;
-    const bool should_read = hallIrqFlag || (scheduled_us - rt.hall_time_us >= STREAM_PERIOD_US);
+    const uint64_t hall_check_before_us =
+        static_cast<uint64_t>(esp_timer_get_time());
+    const bool should_read =
+        hallIrqFlag || ageUs(hall_check_before_us, rt.hall_time_us) >= STREAM_PERIOD_US;
+
     if (should_read) {
       Tmag5273::Sample sample{};
       if (hall.readSample(sample)) {
         rt.hall_sample = sample;
         rt.hall_time_us = static_cast<uint64_t>(esp_timer_get_time());
+        rt.hall_consecutive_read_errors = 0;
         hallIrqFlag = false;
       } else {
         ++counters.hall_read_errors;
+        if (rt.hall_consecutive_read_errors < 255) {
+          ++rt.hall_consecutive_read_errors;
+        }
         drops |= DROP_HALL_READ_FAIL;
-        // 连续失败交给下一个周期的身份校验/重初始化。
-        if ((counters.hall_read_errors % 3u) == 0u) {
+
+        if (rt.hall_consecutive_read_errors >= 3) {
           rt.hall_ok = false;
-          rt.next_hall_reinit_us = scheduled_us + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
+          rt.hall_consecutive_read_errors = 0;
+          rt.next_hall_reinit_us =
+              static_cast<uint64_t>(esp_timer_get_time()) +
+              static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
         }
       }
     }
 
-    if (rt.hall_time_us && scheduled_us - rt.hall_time_us <= HALL_STALE_US) {
+    const uint64_t hall_check_after_us =
+        static_cast<uint64_t>(esp_timer_get_time());
+    if (ageUs(hall_check_after_us, rt.hall_time_us) <= HALL_STALE_US) {
       status |= STATUS_HALL_VALID;
     } else {
       drops |= DROP_HALL_STALE;
@@ -278,6 +426,7 @@ void acquireAndSendFrame(uint64_t scheduled_us, bool scheduler_overrun) {
     if (imu.readSample(sample, fresh)) {
       rt.imu_sample = sample;
       rt.imu_time_us = static_cast<uint64_t>(esp_timer_get_time());
+      rt.imu_consecutive_read_errors = 0;
       status |= STATUS_IMU_VALID;
       if (fresh) {
         status |= STATUS_IMU_FRESH;
@@ -285,14 +434,22 @@ void acquireAndSendFrame(uint64_t scheduled_us, bool scheduler_overrun) {
       }
     } else {
       ++counters.imu_read_errors;
+      if (rt.imu_consecutive_read_errors < 255) {
+        ++rt.imu_consecutive_read_errors;
+      }
       drops |= DROP_IMU_READ_FAIL;
-      if ((counters.imu_read_errors % 3u) == 0u) {
+      if (rt.imu_consecutive_read_errors >= 3) {
         rt.imu_ok = false;
-        rt.next_imu_reinit_us = scheduled_us + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
+        rt.imu_consecutive_read_errors = 0;
+        rt.next_imu_reinit_us =
+            static_cast<uint64_t>(esp_timer_get_time()) +
+            static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;
       }
     }
 
-    if (!rt.imu_time_us || scheduled_us - rt.imu_time_us > IMU_STALE_US) {
+    const uint64_t imu_check_us =
+        static_cast<uint64_t>(esp_timer_get_time());
+    if (ageUs(imu_check_us, rt.imu_time_us) > IMU_STALE_US) {
       status &= ~(STATUS_IMU_VALID | STATUS_IMU_FRESH);
       drops |= DROP_IMU_STALE;
     }
@@ -300,7 +457,7 @@ void acquireAndSendFrame(uint64_t scheduled_us, bool scheduler_overrun) {
     drops |= DROP_IMU_STALE;
   }
 
-  if (rt.imu_time_us) {
+  if (status & STATUS_IMU_VALID) {
     status |= STATUS_POSE_VALID | STATUS_POSE_YAW_RELATIVE;
   }
   if (rt.i2c_recovered_since_last_frame) status |= STATUS_I2C_RECOVERED;
@@ -449,9 +606,15 @@ void setup() {
   imuSpi.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_IMU_CS);
 
   rt.boot_id = esp_random();
+
+  // 启动时只扫描一次。先释放潜在卡死的 SDA，再在生产 I²C 速率下扫描。
+  // scan 结果持久保存在 Runtime，并通过每个 HEALTH 包重复上报。
+  recoverI2CBus(false);
+  runI2CScanOnce();
+
   const uint64_t now = static_cast<uint64_t>(esp_timer_get_time());
 
-  rt.hall_ok = initHall();
+  rt.hall_ok = initHall(false);
   rt.imu_ok = initImu();
 
   rt.next_hall_reinit_us = now + static_cast<uint64_t>(SENSOR_REINIT_INTERVAL_MS) * 1000ULL;

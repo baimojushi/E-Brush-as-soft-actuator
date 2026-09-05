@@ -50,3 +50,25 @@
 - bit5 发送背压
 
 不插值填补原始数据。
+
+
+## HEALTH V1.1：一次性 I²C 扫描与 Hall 初始化诊断
+
+固件每次 MCU 启动后在 Hall 总线 `GPIO8=SCL / GPIO9=SDA` 上扫描一次，
+扫描范围为 `0x08..0x7E`。结果不重复扫描，后续每个 `HEALTH` 包重复携带同一结果：
+
+- `i2c_scan_bitmap_lo`：地址 `0x00..0x3F`
+- `i2c_scan_bitmap_hi`：地址 `0x40..0x7F`
+- `i2c_scan_addresses`：主机解析出的 ACK 地址列表
+- `i2c_scan_duration_us`
+- `hall_i2c_address`
+- `hall_variant`
+- `hall_init_error`
+- `hall_manufacturer_lsb/msb`
+- `hall_device_id`
+- `hall_recoveries / imu_recoveries`
+
+TMAG5273 工厂地址候选按 `0x35, 0x22, 0x78, 0x44` 自动探测。
+图纸中的“移动 Hall A2”表示采集通道，不用于强制 `DEVICE_ID.VER=2`。
+
+主机端同时兼容旧 52-byte HEALTH 与 V1.1 88-byte HEALTH。

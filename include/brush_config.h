@@ -25,13 +25,17 @@ static constexpr uint32_t SPI_HZ = 8000000;  // LSM6DSR 规格允许最高 10 MH
 static constexpr uint32_t STREAM_HZ = 200;
 static constexpr uint32_t STREAM_PERIOD_US = 1000000UL / STREAM_HZ;
 
-// TMAG5273 A2：默认 7-bit 地址 0x35；±133 mT 档位为 250 LSB/mT。
-// 32 次平均时三轴更新约 400 SPS，兼顾噪声与 200 Hz 主帧。
-static constexpr uint8_t HALL_I2C_ADDR = 0x35;
-static constexpr uint8_t HALL_EXPECTED_VARIANT = 2;
+// 图纸中的“移动 Hall A2”是通道编号，不把它等同于 TMAG5273 x2 量程版本。
+// TMAG5273 的四组工厂 7-bit I²C 地址。启动时扫描一次并优先探测已 ACK 的候选地址。
+static constexpr uint8_t HALL_I2C_ADDR_CANDIDATES[] = {0x35, 0x22, 0x78, 0x44};
+static constexpr size_t HALL_I2C_ADDR_CANDIDATE_COUNT =
+    sizeof(HALL_I2C_ADDR_CANDIDATES) / sizeof(HALL_I2C_ADDR_CANDIDATES[0]);
+
+// 32 次平均，三轴连续测量。磁量程保持 _RANGE=0：
+// DEVICE_ID.VER=1 -> ±40 mT；VER=2 -> ±133 mT。
+// 工程量换算由上位机根据实际 VER 动态选择，原始码始终保留。
 static constexpr uint8_t HALL_CONV_AVG_CODE = 5;
 static constexpr bool HALL_LOW_NOISE = true;
-static constexpr float HALL_LSB_PER_MT = 250.0f;
 
 // LSM6DSR：208 Hz，±4 g，±1000 dps。
 static constexpr float IMU_ACCEL_MG_PER_LSB = 0.122f;

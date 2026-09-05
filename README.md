@@ -38,7 +38,7 @@ GPIO19/GPIO20 不使用，保留 ESP32-S3 原生 USB 能力。
 ## 2. 固件参数
 
 - 主帧 200 Hz
-- TMAG5273 A2：I2C 400 kHz，0x35，三轴连续测量，32x 平均，低噪声，±133 mT
+- TMAG5273：I2C 400 kHz；上电一次性扫描；自动探测工厂地址 0x35/0x22/0x78/0x44；三轴连续测量，32x 平均，低噪声；量程按 DEVICE_ID.VER 动态解释
 - Hall INT：转换完成锁存中断；漏中断时仍有主周期轮询兜底
 - LSM6DSR：四线 SPI Mode 3，8 MHz，208 Hz，±4g，±1000 dps
 - 串口：921600 bit/s
@@ -77,7 +77,7 @@ python tools/smoke_test.py --port COM7 --seconds 15 --log capture.brlog
 - `clock synced: True`
 - `frame_id_gap == 0`
 - `drop_flag_names` 长期为空
-- `hall_variant == 2`
+- `hall_variant == 1` 或 `2`，`hall_init_error_name == "none"`，并确认 `hall_i2c_address_hex`
 - `imu_who_am_i == 107`（0x6B）
 - `hall_read_errors/imu_read_errors` 不持续增长
 
@@ -95,7 +95,7 @@ python tools/smoke_test.py --port COM7 --seconds 15 --log capture.brlog
 ## 6. 产品级冗余
 
 固件已包含：
-- Hall 身份校验、TI manufacturer ID 校验、A2 变体校验
+- Hall 上电一次性 I²C scan、四工厂地址自动探测、TI manufacturer ID 与 DEVICE_ID 校验
 - IMU WHO_AM_I=0x6B 校验
 - Hall I2C 总线 9 时钟恢复 + STOP
 - Hall/IMU 独立重初始化，不因单个传感器掉线阻塞全链
@@ -110,5 +110,36 @@ python tools/smoke_test.py --port COM7 --seconds 15 --log capture.brlog
 ## 7. 首次实机必须做的三项确认
 
 1. **IMU660RB 模块丝印**：确认 6P 信号顺序与图纸信号名一致。
-2. **Hall 磁场范围**：若实际磁场接近 ±133 mT，先排查磁路/间距；不要直接放宽到 ±266 mT 掩盖饱和问题。需要放宽时改 `SENSOR_CONFIG_2` 与主机换算系数并生成新标定编号。
+2. **Hall 身份/量程**：先看 HEALTH 的 `i2c_scan_addresses_hex / hall_i2c_address_hex / hall_variant / hall_init_error_name`。VER=1 在 `_RANGE=0` 时按 ±40 mT 解释，VER=2 按 ±133 mT 解释；原始码不改写。
 3. **深度相机时间戳**：优先使用相机 SDK 原生设备时间戳；只有到达时间时，记录该模式并把对齐允差单独标记。
+
+
+## 8. V1.1 Hall 诊断
+
+本版启动后只执行一次 I²C scan，并通过 HEALTH 持续上报扫描快照。运行：
+
+```bash
+python tools/smoke_test.py --port COM7 --seconds 15 --log capture.brlog
+```
+
+重点看：
+
+```text
+i2c_scan_addresses_hex
+hall_i2c_address_hex
+hall_variant
+hall_init_error_name
+hall_manufacturer_lsb
+hall_manufacturer_msb
+hall_device_id
+hall_reinit_attempts
+hall_recoveries
+```
+
+典型 C2 地址场景应看到 `0x78` 出现在 `i2c_scan_addresses_hex`，随后
+`hall_i2c_address_hex == "0x78"`、`hall_variant == 2`、`hall_init_error_name == "none"`。
+
+如果扫描列表里完全没有 `0x35/0x22/0x78/0x44`，优先检查 Hall 的 3V3、GND(TEST)、SCL/SDA、
+上拉与焊接方向。IMU660RB 在本工程中使用独立四线 SPI，因此 IMU 正常不能证明 GPIO8/9 的 Hall I²C 总线正常。
+
+V1.1 同时修复 Hall/IMU stale 判定中的无符号时间差下溢，并把传感器运行期重初始化门限改为“连续 3 次读取失败”。

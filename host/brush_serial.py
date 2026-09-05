@@ -36,7 +36,8 @@ PT_CMD_PING = 0x84
 
 DATA = struct.Struct("<IIQQQIIhhhhBBBBhhhhhhhffff")
 HELLO = struct.Struct("<IIIIHHHHBBHI")
-HEALTH = struct.Struct("<QIIIIIIIIIII")
+HEALTH_V1 = struct.Struct("<QIIIIIIIIIII")
+HEALTH_V11 = struct.Struct("<QIIIIIIIIIIIQQIII8B")
 SYNC_REQ = struct.Struct("<QI")
 SYNC_RESP = struct.Struct("<QIQQ")
 
@@ -64,7 +65,23 @@ DROP_BITS = {
     5: "tx_backpressure",
 }
 
-HALL_LSB_PER_MT = 250.0
+HALL_LSB_PER_MT_BY_VARIANT = {
+    1: 820.0,  # VER=1, _RANGE=0 -> ±40 mT
+    2: 250.0,  # VER=2, _RANGE=0 -> ±133 mT
+}
+
+HALL_INIT_ERROR_NAMES = {
+    0: "none",
+    1: "manufacturer_lsb_read",
+    2: "manufacturer_msb_read",
+    3: "manufacturer_mismatch",
+    4: "device_id_read",
+    5: "device_variant_invalid",
+    6: "config_write",
+    7: "config_readback",
+    8: "no_candidate_ack",
+}
+
 HALL_TEMP_T0_RAW = 17508.0
 HALL_TEMP_T0_C = 25.0
 HALL_TEMP_LSB_PER_C = 58.0
@@ -141,6 +158,18 @@ def parse_raw_packet(raw: bytes) -> Tuple[Tuple[int, int, int, int, int, int], b
 
 def _bits(value: int, names: Dict[int, str]) -> List[str]:
     return [name for bit, name in names.items() if value & (1 << bit)]
+
+
+def decode_i2c_scan_addresses(bitmap_lo: int, bitmap_hi: int) -> List[int]:
+    out = []
+    for addr in range(0x00, 0x80):
+        if addr < 0x40:
+            present = bool(bitmap_lo & (1 << addr))
+        else:
+            present = bool(bitmap_hi & (1 << (addr - 0x40)))
+        if present:
+            out.append(addr)
+    return out
 
 
 @dataclasses.dataclass
@@ -463,25 +492,80 @@ class BrushSerial:
             self.latest_hello = hello
             return
 
-        if ptype == PT_HEALTH:
-            vals = HEALTH.unpack(payload)
-            self.latest_health = {
-                "uptime_us": vals[0],
-                "frames_intended": vals[1],
-                "frames_sent": vals[2],
-                "tx_drops": vals[3],
-                "rx_crc_errors_mcu": vals[4],
-                "rx_frame_errors_mcu": vals[5],
-                "hall_read_errors": vals[6],
-                "imu_read_errors": vals[7],
-                "hall_reinits": vals[8],
-                "imu_reinits": vals[9],
-                "free_heap": vals[10],
-                "min_free_heap": vals[11],
-                "host_rx_ns": host_rx_ns,
-            }
-            return
 
+        if ptype == PT_HEALTH:
+            if len(payload) == HEALTH_V11.size:
+                vals = HEALTH_V11.unpack(payload)
+                scan_addresses = decode_i2c_scan_addresses(vals[12], vals[13])
+                hall_addr = vals[19]
+                hall_variant = vals[20]
+                hall_init_error = vals[21]
+
+                self.latest_health = {
+                    "uptime_us": vals[0],
+                    "frames_intended": vals[1],
+                    "frames_sent": vals[2],
+                    "tx_drops": vals[3],
+                    "rx_crc_errors_mcu": vals[4],
+                    "rx_frame_errors_mcu": vals[5],
+                    "hall_read_errors": vals[6],
+                    "imu_read_errors": vals[7],
+
+                    # 旧协议字段名保留；同时给出更准确的语义别名。
+                    "hall_reinits": vals[8],
+                    "imu_reinits": vals[9],
+                    "hall_reinit_attempts": vals[8],
+                    "imu_reinit_attempts": vals[9],
+
+                    "free_heap": vals[10],
+                    "min_free_heap": vals[11],
+
+                    "i2c_scan_bitmap_lo": vals[12],
+                    "i2c_scan_bitmap_hi": vals[13],
+                    "i2c_scan_duration_us": vals[14],
+                    "hall_recoveries": vals[15],
+                    "imu_recoveries": vals[16],
+                    "i2c_scan_count": vals[17],
+                    "i2c_scan_done": bool(vals[18]),
+                    "i2c_scan_addresses": scan_addresses,
+                    "i2c_scan_addresses_hex": [f"0x{x:02X}" for x in scan_addresses],
+
+                    "hall_i2c_address": hall_addr,
+                    "hall_i2c_address_hex": f"0x{hall_addr:02X}" if hall_addr else None,
+                    "hall_variant": hall_variant,
+                    "hall_init_error": hall_init_error,
+                    "hall_init_error_name": HALL_INIT_ERROR_NAMES.get(
+                        hall_init_error, f"unknown_{hall_init_error}"
+                    ),
+                    "hall_manufacturer_lsb": vals[22],
+                    "hall_manufacturer_msb": vals[23],
+                    "hall_device_id": vals[24],
+                    "host_rx_ns": host_rx_ns,
+                    "health_schema": "v1.1",
+                }
+            elif len(payload) == HEALTH_V1.size:
+                vals = HEALTH_V1.unpack(payload)
+                self.latest_health = {
+                    "uptime_us": vals[0],
+                    "frames_intended": vals[1],
+                    "frames_sent": vals[2],
+                    "tx_drops": vals[3],
+                    "rx_crc_errors_mcu": vals[4],
+                    "rx_frame_errors_mcu": vals[5],
+                    "hall_read_errors": vals[6],
+                    "imu_read_errors": vals[7],
+                    "hall_reinits": vals[8],
+                    "imu_reinits": vals[9],
+                    "hall_reinit_attempts": vals[8],
+                    "imu_reinit_attempts": vals[9],
+                    "free_heap": vals[10],
+                    "min_free_heap": vals[11],
+                    "host_rx_ns": host_rx_ns,
+                    "health_schema": "v1",
+                }
+            else:
+                self.stats["health_unknown_size"] += 1
+            return
         if ptype == PT_DATA:
             vals = DATA.unpack(payload)
             frame = self._decode_data(vals, host_rx_ns)
@@ -524,6 +608,17 @@ class BrushSerial:
             hall_host_ns = host_rx_ns if hall_time_us else 0
             imu_host_ns = host_rx_ns if imu_time_us else 0
 
+        hall_variant = 0
+        if self.latest_health:
+            hall_variant = int(self.latest_health.get("hall_variant", 0) or 0)
+        if hall_variant not in (1, 2) and self.latest_hello:
+            hall_variant = int(self.latest_hello.get("hall_variant", 0) or 0)
+
+        hall_lsb_per_mT = HALL_LSB_PER_MT_BY_VARIANT.get(hall_variant)
+        bx_mT = hx / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
+        by_mT = hy / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
+        bz_mT = hz / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
+
         return {
             "frame_id": frame_id,
             "calibration_id": calibration_id,
@@ -551,9 +646,11 @@ class BrushSerial:
             "accel_x_raw": ax, "accel_y_raw": ay, "accel_z_raw": az,
 
             # 工程量，全部可由原始码重新计算
-            "bx_mT": hx / HALL_LSB_PER_MT,
-            "by_mT": hy / HALL_LSB_PER_MT,
-            "bz_mT": hz / HALL_LSB_PER_MT,
+            "hall_variant": hall_variant,
+            "hall_lsb_per_mT": hall_lsb_per_mT if hall_lsb_per_mT else math.nan,
+            "bx_mT": bx_mT,
+            "by_mT": by_mT,
+            "bz_mT": bz_mT,
             "hall_temp_C": HALL_TEMP_T0_C + (ht - HALL_TEMP_T0_RAW) / HALL_TEMP_LSB_PER_C,
             "imu_temp_C": 25.0 + imu_temp / 256.0,
             "gx_rad_s": gx * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,

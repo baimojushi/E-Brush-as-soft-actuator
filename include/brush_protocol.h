@@ -54,6 +54,7 @@ enum Capabilities : uint32_t {
   CAP_QUAT_6AXIS    = 1u << 2,
   CAP_CLOCK_SYNC    = 1u << 3,
   CAP_HEALTH        = 1u << 4,
+  CAP_I2C_SCAN_DIAGNOSTICS = 1u << 5,
 };
 
 #pragma pack(push, 1)
@@ -119,6 +120,7 @@ struct HelloPayload {
 };
 
 struct HealthPayload {
+  // V1 基础字段，顺序保持不变，便于主机兼容旧日志。
   uint64_t uptime_us;
   uint32_t frames_intended;
   uint32_t frames_sent;
@@ -127,10 +129,29 @@ struct HealthPayload {
   uint32_t rx_frame_errors;
   uint32_t hall_read_errors;
   uint32_t imu_read_errors;
+
+  // 兼容旧字段名：这里统计的是“失败状态下的重新初始化尝试次数”。
   uint32_t hall_reinits;
   uint32_t imu_reinits;
   uint32_t free_heap;
   uint32_t min_free_heap;
+
+  // V1.1 追加诊断字段。
+  // bit N 对应 7-bit I²C 地址 N；扫描只在每次 MCU 启动后执行一次。
+  uint64_t i2c_scan_bitmap_lo;  // 0x00..0x3F
+  uint64_t i2c_scan_bitmap_hi;  // 0x40..0x7F
+  uint32_t i2c_scan_duration_us;
+  uint32_t hall_recoveries;     // 运行期从失败状态恢复成功次数
+  uint32_t imu_recoveries;
+
+  uint8_t i2c_scan_count;
+  uint8_t i2c_scan_done;
+  uint8_t hall_i2c_address;     // 0 = 尚未确认 TMAG5273
+  uint8_t hall_variant;         // DEVICE_ID.VER: 1 / 2，0 = 未确认
+  uint8_t hall_init_error;      // Tmag5273::InitError
+  uint8_t hall_manufacturer_lsb;
+  uint8_t hall_manufacturer_msb;
+  uint8_t hall_device_id;
 };
 
 struct SyncRequestPayload {
