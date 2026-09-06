@@ -130,7 +130,12 @@ def chop_dat_header() -> str:
 
 def live_loop(port: Optional[str], baud: int, rate_hz: float, chop_dat_path: Optional[str]):
     """Open BrushSerial, print 17-channel CSV rows at ~rate_hz, and optionally
-    stream a CHOP DAT file as the frames arrive."""
+    stream a CHOP DAT file as the frames arrive.
+
+    The background thread continuously updates `bs.latest` with the most recent
+    DATA frame.  We sample `bs.latest` at the requested `rate_hz` so we never
+    miss the freshest frame and we never print faster than requested.
+    """
     sys.path_importer_cache = sys.path_importer_cache  # noqa: silence linter
     import auto_detect_port as adp  # type: ignore
 
@@ -147,7 +152,6 @@ def live_loop(port: Optional[str], baud: int, rate_hz: float, chop_dat_path: Opt
         chop_out.write(chop_dat_header() + "\n")
 
     sample_index = 0
-    last_print = 0.0
     period = 1.0 / max(rate_hz, 0.1)
     next_print = time.monotonic()
 
@@ -159,13 +163,10 @@ def live_loop(port: Optional[str], baud: int, rate_hz: float, chop_dat_path: Opt
                 time.sleep(min(0.005, next_print - now))
                 continue
 
-            drained = bs.drain(limit=64) if hasattr(bs, "drain") else []
-            if not drained and bs.latest is not None:
-                drained = [bs.latest]
-                bs.latest = None  # type: ignore
-
-            if drained:
-                frame = drained[-1]
+            # Always use the freshest frame from the background thread.
+            # bs.latest is updated by the reader thread on every DATA packet.
+            frame = bs.latest
+            if frame is not None:
                 row = frame_to_row(frame)
                 csv_out.write(",".join("" if (isinstance(v, float) and math.isnan(v)) else f"{v:.6f}" for v in row) + "\n")
                 csv_out.flush()
@@ -173,7 +174,9 @@ def live_loop(port: Optional[str], baud: int, rate_hz: float, chop_dat_path: Opt
                     chop_out.write(f"{sample_index}\t" + frame_to_chop_row(frame, CHANNEL_ORDER) + "\n")
                     sample_index += 1
                 last_print = now
-            next_print = last_print + period
+            # If no frame yet, just wait for the next tick.
+
+            next_print = now + period
     except KeyboardInterrupt:
         print("\n[INFO] Ctrl-C; stopping stream.")
     finally:
