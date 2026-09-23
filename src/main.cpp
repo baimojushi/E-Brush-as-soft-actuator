@@ -9,6 +9,7 @@
 #include "tmag5273.h"
 #include "lsm6dsr.h"
 #include "mahony6.h"
+#include "font.h"
 
 using namespace BrushConfig;
 using namespace BrushProtocol;
@@ -79,6 +80,11 @@ struct Runtime {
   Lsm6dsr::Sample imu_sample{};
   float q_w = 1.0f, q_x = 0.0f, q_y = 0.0f, q_z = 0.0f;
 } rt;
+
+// ★ OLED 显示层 (SSD1306 I2C + 黄宾虹开机动画 + 按钮三态切换)。
+//    读取上方 Runtime rt 的真实传感器数据; 定义在 namespace { ... } 内部,
+//    故必须在此处 include (rt 定义之后)。
+#include "oled_display.h"
 
 uint8_t rxWire[MAX_WIRE_PACKET];
 size_t rxWireLen = 0;
@@ -600,6 +606,9 @@ void setup() {
   pinMode(PIN_HALL_INT, INPUT);  // 图纸已有 4.7 kΩ 外部上拉
   attachInterrupt(digitalPinToInterrupt(PIN_HALL_INT), onHallInterrupt, FALLING);
 
+  // ★ OLED: 外接按钮信号脚 GPIO5, 另一端接 GND (上拉输入, 按下=低电平)
+  pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+
   hallWire.begin(PIN_HALL_SDA, PIN_HALL_SCL, I2C_HZ);
   hallWire.setTimeOut(8);
 
@@ -625,10 +634,16 @@ void setup() {
   // 给上位机串口打开留少量时间，同时保持无文本日志，避免污染二进制协议。
   delay(50);
   sendHello();
+
+  // ★ OLED 初始化 (专用 I2C1 / Wire1, 与传感器总线物理隔离)
+  oled_init();
 }
 
 void loop() {
   processSerialRx();
+
+  // ★ OLED 显示任务: 按钮扫描 + 三态页面切换 + 20Hz 节流刷新
+  oled_uploop();
 
   const uint64_t now = static_cast<uint64_t>(esp_timer_get_time());
   maybeReinitSensors(now);
