@@ -1,0 +1,17 @@
+{
+  "firmware_version": "1.1.0",
+  "python_files_compiled": 10,
+  "protocol_test": "protocol roundtrip OK",
+  "health_test": "HEALTH v1/v1.1 compatibility OK",
+  "struct_sizes": {
+    "health_v1": 52,
+    "health_v1_1": 88
+  },
+  "static_checks": {
+    "one_time_scan_present": true,
+    "c2_address_present": true,
+    "stale_underflow_old_expression_removed": true,
+    "health_v11_size_python": 88
+  },
+  "firmware_build": "PlatformIO not installed in this runtime; ESP32-S3 toolchain build not executed."
+}
