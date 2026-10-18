@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""
+e-Brush Studio SAM3 Video Segmentation Integration
+适配 SAM3 v1.2 API (/video/segment 端点)
+用于实时毛笔视频分割，替代已废弃的 /image/segment
+"""
+
+import os, sys, json, time, tempfile, zipfile, io
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+import threading
+
+import cv2
+import numpy as np
+import requests
+
+@dataclass
+class SAM3Config:
+    """SAM3 客户端配置"""
+    base_url: str = "https://desktop-kc6mgc1.tailb2b872.ts.net/sam3"
+    api_key: str = ""
+    prompt: str = "calligraphy brush"
+    jpeg_quality: int = 88
+    timeout_s: float = 30.0
+    clip_frames: int = 30
+    clip_fps: int = 30
+    min_interval_s: float = 0.5
+
+    @classmethod
+    def from_env(cls) -> "SAM3Config":
+        """从环境变量和配置文件加载"""
+        config_path = Path(__file__).parent.parent / "config" / "vision_validation.json"
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f).get("sam3", {})
+            return cls(
+                base_url=cfg.get("base_url", cls.base_url),
+                api_key=os.environ.get(cfg.get("api_key_env", "SAM3_API_KEY"), ""),
+                prompt=cfg.get("prompt", cls.prompt),
+                jpeg_quality=cfg.get("jpeg_quality", cls.jpeg_quality),
+                timeout_s=cfg.get("timeout_s", cls.timeout_s),
+                clip_frames=cfg.get("clip_frames", cls.clip_frames),
+                clip_fps=cfg.get("clip_fps", cls.clip_fps),
+                min_interval_s=cfg.get("min_interval_s", cls.min_interval_s)
+            )
+        return cls(
+            api_key=os.environ.get("SAM3_API_KEY", "")
+        )
+
+@dataclass
+class SamResult:
+    frame_id: int
+    host_ns: int
+    mask: Optional[np.ndarray]
+    score: float = 0.0
+    bbox: Optional[tuple] = None
+    latency_ms: float = 0.0
+    error: str = ""
+    prompt: str = ""
+    camera_context: object = None
+
+class SAM3Client:
+    """
+    异步 SAM3 视频分割客户端
+    
+    设计要点:
+    - 缓冲帧组装成短视频片段
+    - 使用 /video/segment 端点 (SAM3 v1.2+)
+    - 支持实时流式处理：最新帧优先，旧帧丢弃
+    - 返回最新帧的最佳掩码
+    """
+    
+    def __init__(self, config: SAM3Config):
+        self.config = config
+        self.base_url = config.base_url.rstrip("/")
+        self.api_key = config.api_key
+        self.prompt = config.prompt
+        self.jpeg_quality = config.jpeg_quality
+        self.timeout = config.timeout_s
+        self.clip_frames = config.clip_frames
+        self.clip_fps = config.clip_fps
+        self.min_interval = config.min_interval_s
+
+        self._frame_buffer: list[tuple[np.ndarray, int, int, str, object]] = []
+        self._lock = threading.Lock()
+        self._result: Optional[SamResult] = None
+        self._stop = False
+        self._wake = threading.Event()
+        self._last_call = 0.0
+
+        self.thread = threading.Thread(target=self._run, name="SAM3Worker", daemon=True)
+        self.thread.start()
+
+    def _headers(self):
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+
+    def health(self) -> dict:
+        """健康检查"""
+        r = requests.get(self.base_url + "/health", headers=self._headers(), timeout=min(5, self.timeout))
+        r.raise_for_status()
+        return r.json()
+
+    def submit(self, rgb: np.ndarray, frame_id: int, host_ns: int, camera_context: object = None):
+        """提交帧用于分割"""
+        with self._lock:
+            self._frame_buffer.append((np.asarray(rgb).copy(), int(frame_id), int(host_ns), str(self.prompt), camera_context))
+
+    def latest(self) -> Optional[SamResult]:
+        with self._lock:
+            return self._result
+
+    @staticmethod
+    def _decode_zip_masks(content: bytes, shape: tuple[int, int]):
+        """解码 ZIP 格式的掩码响应"""
+        masks = []
+        with zipfile.ZipFile(io.BytesIO(content)) as z:
+            for n in z.namelist():
+                if not n.lower().endswith(".png"):
+                    continue
+                a = np.frombuffer(z.read(n), np.uint8)
+                m = cv2.imdecode(a, cv2.IMREAD_GRAYSCALE)
+                if m is None:
+                    continue
+                score = 0.0
+                try:
+                    s = n.rsplit("score", 1)[1].rsplit(".png", 1)[0]
+                    score = float(s)
+                except:
+                    pass
+                masks.append((m > 0, score, n))
+        return masks
+
+    @staticmethod
+    def _pick(masks: list, prev_mask: Optional[np.ndarray] = None):
+        """选择最佳掩码：结合 SAM 分数、形状先验和时序一致性"""
+        if not masks:
+            return None, 0.0, None
+        best = None
+        bestv = -1e9
+        for m, score, n in masks:
+            ys, xs = np.nonzero(m)
+            if len(xs) < 20:
+                continue
+            w = max(1, xs.max() - xs.min() + 1)
+            h = max(1, ys.max() - ys.min() + 1)
+            elong = max(w, h) / max(1, min(w, h))
+            area = float(m.sum())
+            iou = 0.0
+            if prev_mask is not None and prev_mask.shape == m.shape:
+                inter = np.logical_and(m, prev_mask).sum()
+                union = np.logical_or(m, prev_mask).sum()
+                iou = float(inter / max(1, union))
+            v = float(score) + 0.05 * min(elong, 8) / 8 + 0.20 * iou
+            if v > bestv:
+                bestv = v
+                best = (m, score, (int(xs.min()), int(ys.min()), int(xs.max() + 1), int(ys.max() + 1)))
+        return best if best else (None, 0.0, None)
+
+    def _write_clip_to_temp(self, frames: list[np.ndarray]) -> str:
+        """将帧序列写入临时 MP4 文件"""
+        if not frames:
+            return ""
+        h, w = frames[0].shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        tmp = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        writer = cv2.VideoWriter(tmp_path, fourcc, self.clip_fps, (w, h))
+        for frame in frames:
+            writer.write(frame)
+        writer.release()
+        return tmp_path
+
+    def _run(self):
+        """工作线程：定期取帧缓冲组装 clip 并请求分割"""
+        prev_mask = None
+        while not self._stop:
+            self._wake.wait(0.2)
+            self._wake.clear()
+
+            # 取最近的 clip_frames 帧
+            with self._lock:
+                frames_to_process = self._frame_buffer[-self.clip_frames:] if self._frame_buffer else []
+                self._frame_buffer.clear()
+
+            if not frames_to_process:
+                continue
+
+            wait = self.min_interval - (time.perf_counter() - self._last_call)
+            if wait > 0:
+                time.sleep(wait)
+
+            t0 = time.perf_counter()
+            clip_path = ""
+            try:
+                frame_arrays = [f[0] for f in frames_to_process]
+                clip_path = self._write_clip_to_temp(frame_arrays)
+
+                with open(clip_path, 'rb') as f:
+                    files = {'file': (os.path.basename(clip_path), f, 'video/mp4')}
+                    data = {
+                        'text_prompt': frames_to_process[-1][3],
+                        'max_frames': str(self.clip_frames),
+                        'frame_stride': '1',
+                        'return_masks_png': 'true'
+                    }
+                    r = requests.post(
+                        self.base_url + "/video/segment",
+                        headers=self._headers(),
+                        files=files,
+                        data=data,
+                        timeout=self.timeout
+                    )
+                    r.raise_for_status()
+
+                masks = self._decode_zip_masks(r.content, frame_arrays[0].shape[:2])
+
+                if masks:
+                    mask, score, bbox = self._pick(masks, prev_mask)
+                    prev_mask = mask if mask is not None else prev_mask
+                    _, fid, hns, prompt, camera_context = frames_to_process[-1]
+                    res = SamResult(fid, hns, mask, score, bbox, (time.perf_counter() - t0) * 1000, "", prompt, camera_context)
+                else:
+                    _, fid, hns, prompt, camera_context = frames_to_process[-1]
+                    res = SamResult(fid, hns, None, 0, None, (time.perf_counter() - t0) * 1000, "No valid masks", prompt, camera_context)
+
+            except Exception as e:
+                if frames_to_process:
+                    _, fid, hns, prompt, camera_context = frames_to_process[-1]
+                else:
+                    fid, hns, prompt, camera_context = -1, int(time.perf_counter_ns()), self.prompt, None
+                res = SamResult(fid, hns, None, 0, None, (time.perf_counter() - t0) * 1000, f"{type(e).__name__}: {e}", prompt, camera_context)
+            finally:
+                if clip_path and os.path.exists(clip_path):
+                    try:
+                        os.unlink(clip_path)
+                    except:
+                        pass
+
+            self._last_call = time.perf_counter()
+            with self._lock:
+                self._result = res
+
+    def close(self):
+        self._stop = True
+        self._wake.set()
+
+
+# 便捷函数
+def create_sam3_client(config: Optional[SAM3Config] = None) -> SAM3Client:
+    """创建 SAM3 客户端实例"""
+    if config is None:
+        config = SAM3Config.from_env()
+    return SAM3Client(config)
+
+
+if __name__ == "__main__":
+    # 简单测试
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", default=os.environ.get("SAM3_URL"))
+    parser.add_argument("--prompt", default="calligraphy brush")
+    parser.add_argument("--frames", type=int, default=30)
+    parser.add_argument("--fps", type=int, default=30)
+    args = parser.parse_args()
+
+    config = SAM3Config(
+        base_url=args.url or "https://desktop-kc6mgc1.tailb2b872.ts.net/sam3",
+        api_key=os.environ.get("SAM3_API_KEY", ""),
+        prompt=args.prompt,
+        clip_frames=args.frames,
+        clip_fps=args.fps
+    )
+
+    client = SAM3Client(config)
+    
+    try:
+        print("健康检查...")
+        print(json.dumps(client.health(), ensure_ascii=False, indent=2))
+        
+        # 创建测试视频
+        tmp = tempfile.mktemp(suffix='.mp4')
+        h, w = 480, 640
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(tmp, fourcc, args.fps, (w, h))
+        for i in range(args.frames):
+            frame = np.zeros((h, w, 3), dtype=np.uint8)
+            x = int(w * (i + 1) / (args.frames + 1))
+            cv2.circle(frame, (x, h//2), 30, (0, 0, 255), -1)
+            writer.write(frame)
+        writer.release()
+        
+        print(f"\n提交 {args.frames} 帧测试视频...")
+        cap = cv2.VideoCapture(tmp)
+        fid = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret: break
+            client.submit(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), fid, int(time.perf_counter_ns()))
+            fid += 1
+            time.sleep(1/args.fps)
+        cap.release()
+        
+        print("等待处理...")
+        time.sleep(15)
+        
+        result = client.latest()
+        if result:
+            print(f"\n结果: frame={result.frame_id}, score={result.score:.4f}, latency={result.latency_ms:.1f}ms, error={result.error}")
+            if result.mask is not None:
+                print(f"mask: {result.mask.shape}, pixels={result.mask.sum()}")
+        else:
+            print("无结果")
+            
+    finally:
+        client.close()
+        if 'tmp' in locals() and os.path.exists(tmp):
+            os.unlink(tmp)

@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0.0",
+  "episode_id": "20260915T013000Z-0000",
+  "site_id": "lab-desk-a",
+  "writer_id": "W-0000",
+  "created_utc": "2026-09-15T01:30:02Z",
+  "device": {
+    "brush_sn": "BRUSH-SAMPLE-0001",
+    "firmware_version": "1.1.0",
+    "chop_contract_version": "v1.1.0",
+    "hall_variant": 1,
+    "hall_lsb_per_mT": 0.25,
+    "imu_model": "IMU660RB",
+    "conversion_constants_version": "host-v1"
+  },
+  "calibration": {
+    "calibration_id": 41,
+    "pose_zero_corr_qwqxqyqz": [1.0, 0.0, 0.0, 0.0],
+    "pose_zero_captured_utc": null,
+    "hall_center_extrinsics_id": null,
+    "note": "sample episode; identity quat = not yet calibrated"
+  },
+  "timebase": {
+    "mcu_clock": "monotonic_us_since_boot",
+    "host_clock": "posix_ns_wall",
+    "clock_disciplined_at_start": true,
+    "sync_rtt_ms_median": 1.8,
+    "sync_rtt_ms_p95": 3.1,
+    "offset_ns_host_minus_mcu": 1758241200000000000,
+    "offset_uncertainty_ns": 1500000,
+    "episode_t0_host_ns": 1758241200012345678,
+    "nominal_stream_hz": 100
+  },
+  "conditions": {
+    "task_kind": "dynamic_layout_repeated_motion",
+    "char_id": "永",
+    "stroke_pattern": "hen-gna-horizontal-hu",
+    "writer_anon_level": "pseudonymous",
+    "brush": {"model": "e-Brush-v3", "tip_mm": 2.0, "shaft_mm": 10.0},
+    "surface": {"board_steel": true, "steel_plate_id": "SP-02", "deformation_state": "as_installed", "felt": false},
+    "magnet_config": {"count": 6, "layout_id": "hex-ring-60mm", "magnetization": "N45-axial"},
+    "layout": {"board_pose_id": "deskA-pose3", "height_cm": 74.0},
+    "repetition_index": 1,
+    "repetition_group": "rg-sample-a1",
+    "instructions": ["write_char:永", "speed:normal", "repeat:1"],
+    "session_id": "sess-sample-a"
+  },
+  "quality": {
+    "frames_written": 2,
+    "frame_id_gaps": 0,
+    "host_queue_drops": 0,
+    "frames_with_drop_flags": {"sched_overrun": 0, "hall_stale": 0, "imu_stale": 0, "hall_read_fail": 0, "imu_read_fail": 0, "tx_backpressure": 0},
+    "frames_clock_unsynced": 0,
+    "frames_quat_stale": 0,
+    "duration_s": 0.01,
+    "verdict": "ok",
+    "excluded_reason": null,
+    "excluded_by": null
+  },
+  "license": {
+    "mode": "self_only",
+    "agreement_id": "AGR-W-0000-000",
+    "consent_captured_utc": "2026-09-15T01:29:00Z"
+  }
+}
