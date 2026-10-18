@@ -34,4 +34,7 @@ Thumbs.db
 # Temporary
 tmp/
 temp/
-*.tmp
+*.tmp__pycache__/  
+  
+__pycache__/  
+*.pyc  
