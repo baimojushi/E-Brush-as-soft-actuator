@@ -29,7 +29,6 @@ Thumbs.db
 
 # Logs
 *.log
-*.txt
 
 # Temporary
 tmp/

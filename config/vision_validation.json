@@ -1,0 +1,26 @@
+{
+  "sam3": {
+    "base_url": "https://desktop-kc6mgc1.tailb2b872.ts.net/sam3",
+    "api_key_env": "SAM3_API_KEY",
+    "prompt": "calligraphy brush",
+    "jpeg_quality": 88,
+    "timeout_s": 30.0,
+    "min_interval_s": 0.5,
+    "clip_frames": 30,
+    "clip_fps": 30
+  },
+  "vision": {
+    "erode_px": 1,
+    "ransac_threshold_mm": 7.0,
+    "min_points": 80
+  },
+  "camera_to_board": {
+    "enabled": false,
+    "R_board_from_camera": [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1]
+    ],
+    "note": "Set enabled=true only after this rotation is known/validated. Until then the GUI reports camera-frame visual shaft but does not fabricate IMU-vs-vision angle error."
+  }
+}

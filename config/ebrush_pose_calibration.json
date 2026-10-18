@@ -1,0 +1,161 @@
+{
+  "schema": "ebrush_pose_calibration_v1",
+  "created_from": [
+    "20260924_165508_imu_calibration",
+    "20260930_173846_imu_reboot_supplement"
+  ],
+  "coordinate_frames": {
+    "board": {
+      "+X": "right on paper",
+      "+Y": "away from writer",
+      "+Z": "up from paper"
+    },
+    "brush": {
+      "+Z": "tip -> tail/shaft",
+      "+X": "R0 index-mark direction",
+      "+Y": "right-handed: Z cross X"
+    }
+  },
+  "input_convention": {
+    "quaternion_fields": [
+      "q_w",
+      "q_x",
+      "q_y",
+      "q_z"
+    ],
+    "quaternion_semantics": "sensor/IMU frame -> fusion-world frame",
+    "quaternion_norm_expected": 1.0,
+    "accel_fields_m_s2": [
+      "ax_m_s2",
+      "ay_m_s2",
+      "az_m_s2"
+    ],
+    "gyro_fields_rad_s": [
+      "gx_rad_s",
+      "gy_rad_s",
+      "gz_rad_s"
+    ]
+  },
+  "accelerometer": {
+    "model": "a_cal = C @ (a_raw - bias)",
+    "gravity_m_s2": 9.80665,
+    "bias_m_s2": [
+      -0.0294498,
+      -0.27133734,
+      0.09442258
+    ],
+    "C": [
+      [
+        0.982913,
+        0.0,
+        0.0
+      ],
+      [
+        0.0032643,
+        0.9974673,
+        0.0
+      ],
+      [
+        -0.0030804,
+        -0.0026537,
+        0.99555089
+      ]
+    ],
+    "fit_static_norm_rms_m_s2": 0.04174486,
+    "fit_static_abs_residual_p95_m_s2": 0.08211423
+  },
+  "gyroscope": {
+    "static_bias_rad_s": [
+      -0.00244346,
+      -0.00671952,
+      0.00244346
+    ],
+    "note": "diagnostic bias estimate; do not subtract from the already-fused quaternion"
+  },
+  "rigid_mount": {
+    "R_imu_from_brush": [
+      [
+        -0.03457856,
+        0.00435646,
+        -0.99939249
+      ],
+      [
+        0.99786617,
+        0.0555675,
+        -0.03428352
+      ],
+      [
+        0.05538439,
+        -0.99844543,
+        -0.00626861
+      ]
+    ],
+    "brush_shaft_plusZ_in_imu": [
+      -0.99939249,
+      -0.03428352,
+      -0.00626861
+    ],
+    "shaft_fit_excluded_label": "XN45_R0",
+    "shaft_fit_rms_deg_excluding_XN45_R0": 5.02147837,
+    "note": "shaft direction is strongly constrained; brush +X roll zero uses UP_R0 index-mark reference"
+  },
+  "calibration_session_board_alignment": {
+    "fusion_world_to_board_yaw_deg": -24.56079447,
+    "R_board_from_fusion_calibration_session": [
+      [
+        0.90957489,
+        0.41554002,
+        0.0
+      ],
+      [
+        -0.41554002,
+        0.90957489,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "warning": "this yaw is valid for the calibration boot/session only; do not treat it as magnetic/absolute heading after arbitrary power cycles"
+  },
+  "power_cycle_test": {
+    "same_physical_pose_frames_A": 941,
+    "same_physical_pose_frames_B": 941,
+    "relative_rotation_deg": 1.5817542,
+    "relative_axis_fusion": [
+      0.00496104,
+      0.00799271,
+      0.99995575
+    ],
+    "B_world_to_A_world_quaternion_xyzw": [
+      -6.84771e-05,
+      -0.0001103236,
+      -0.0138023603,
+      0.999904734
+    ],
+    "interpretation": "observed reboot difference was almost entirely a small rotation about gravity; six-axis IMU heading remains non-absolute"
+  },
+  "runtime_policy": {
+    "recommended_heading_mode": "startup_reference",
+    "startup_reference_instruction": "At program start hold brush in UP_R0: shaft vertical, R0 index mark facing board +X. Keep still until REFERENCE LOCKED.",
+    "absolute_observable": [
+      "gravity-referenced tilt / brush shaft direction"
+    ],
+    "not_absolute_without_external_reference": [
+      "heading/yaw about gravity"
+    ],
+    "external_heading_future": "TouchDesigner/vision asymmetric marker may replace startup reference"
+  },
+  "quality": {
+    "full_calibration_frames": 15248,
+    "reboot_supplement_frames": 3577,
+    "quaternion_validation": "q rotates measured static acceleration to approximately fusion +Z",
+    "notes": [
+      "XN45_R0 was dynamically contaminated in the original board-pose recording and excluded from shaft fit.",
+      "R90/R180/R270 hand rotations did not keep the shaft axis sufficiently fixed for a high-confidence roll-axis fit; roll zero therefore anchors to UP_R0.",
+      "Hall bx/by/bz fields are not treated as a geomagnetic compass."
+    ]
+  }
+}

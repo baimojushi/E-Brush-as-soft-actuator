@@ -1,0 +1,60 @@
+e-Brush Studio 集成说明
+========================
+
+核心组件
+--------
+
+1. **HP60C 直接采集** (`host/hp60c_direct.py`)
+   - 直接在 Python 进程中调用 Angstrong SDK
+   - 支持 RGB + Depth + PointCloud 同步回调
+   - 自动处理 open_camera -82 重试逻辑
+   - 30fps @ 640x480 深度流配置
+
+2. **VisionPoseEstimator** (`host/vision_pose.py`)
+   - 从 SAM3 掩码 + 相机点云提取毛笔 3D 轴向
+   - RANSAC 直线拟合 + 时间一致性修正
+   - 支持相机→纸面坐标系变换对比
+
+3. **SAM3 视频分割客户端** (`host/sam3_client.py`)
+   - 异步缓冲帧组装 clip (默认 30 帧 @ 30fps)
+   - POST /video/segment 批处理端点
+   - ZIP 掩码解码 + 最佳掩码选择 (score + 形状先验 + 时序 IoU)
+
+4. **姿态映射** (`tools/ebrush_realtime_pose_mapper.py`)
+   - 完整 e-Brush 标定管线：IMU→笔坐标系→纸面坐标系
+   - 启动参考模式 (UP_R0 1.5s 锁定 heading)
+   - 输出：brush_q_w/x/y/z, brush_axis_x/y/z, tilt_x/y_deg, heading_rel_deg, pose_quality
+
+配置文件
+--------
+- `config/vision_validation.json` - SAM3/视觉/相机参数
+- `config/ebrush_pose_calibration.json` - 完整标定参数 (C/bias, R_imu_from_brush, board alignment)
+- `config/hall_sensor_mount.json` - 霍尔安装矩阵
+
+运行方式
+--------
+```bash
+# Studio v1.2 (当前运行版)
+cd ebrush_python_studio_v08_pose_calibration
+py -3 app\main.py --camera-backend none
+
+# 仅姿态映射 CLI
+cd e-Brush/tools
+python ebrush_realtime_pose_mapper.py --port COM7 --baud 921600
+
+# HP60C 直接采集测试
+python -m host.hp60c_direct
+```
+
+依赖
+----
+- Python 3.12+
+- opencv-python, numpy, requests, pyserial
+- PySide6, pyqtgraph (GUI)
+- Angstrong SDK DLL (hp60c_direct.py)
+
+硬件端口
+--------
+- COM3: ESP32-C3 (115200) - 调试/状态输出
+- COM7: CH343 (921600) - e-Brush 笔端主数据流
+- HP60C: USB 3.0 (VID_3482&PID_6723) - 相机
