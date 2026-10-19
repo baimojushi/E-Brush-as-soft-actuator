@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import threading
+from collections import deque
+import re
 
 import cv2
 import numpy as np
@@ -82,7 +84,7 @@ class SAM3Client:
         self.clip_fps = config.clip_fps
         self.min_interval = config.min_interval_s
 
-        self._frame_buffer: list[tuple[np.ndarray, int, int, str, object]] = []
+        self._frame_buffer = deque(maxlen=max(1,self.clip_frames))
         self._lock = threading.Lock()
         self._result: Optional[SamResult] = None
         self._stop = False
@@ -105,30 +107,68 @@ class SAM3Client:
         """提交帧用于分割"""
         with self._lock:
             self._frame_buffer.append((np.asarray(rgb).copy(), int(frame_id), int(host_ns), str(self.prompt), camera_context))
+        self._wake.set()
 
     def latest(self) -> Optional[SamResult]:
         with self._lock:
             return self._result
 
     @staticmethod
-    def _decode_zip_masks(content: bytes, shape: tuple[int, int]):
-        """解码 ZIP 格式的掩码响应"""
+    def _decode_zip_masks(content: bytes, shape: tuple[int, int],
+                          frame_index: int, expected_frames: int | None = None):
+        """Defensively select only the exact predicted camera clip frame."""
+        if len(content) > 100 * 1024 * 1024:
+            raise ValueError("SAM3 prediction archive too large")
         masks = []
         with zipfile.ZipFile(io.BytesIO(content)) as z:
-            for n in z.namelist():
-                if not n.lower().endswith(".png"):
+            names=z.namelist()
+            if len(names)!=len(set(names)) or len(names)>12000:
+                raise ValueError("Duplicate or excessive ZIP members")
+            if sum(item.file_size for item in z.infolist())>200*1024*1024:
+                raise ValueError("SAM3 uncompressed prediction exceeds limit")
+            if "meta.json" not in names:
+                raise ValueError("SAM3 ZIP missing meta.json")
+            meta=json.loads(z.read("meta.json"))
+            count=meta.get("num_frames")
+            if type(count) is not int or count<=frame_index or frame_index<0:
+                raise ValueError("SAM3 ZIP frame count mismatch")
+            if expected_frames is not None and count!=expected_frames:
+                raise ValueError("SAM3 ZIP does not match requested clip length")
+            if "frame_indices" in meta and meta["frame_indices"]!=list(range(count)):
+                raise ValueError("SAM3 ZIP frame index mapping mismatch")
+            confidence={}
+            rows=meta.get("frame_results")
+            if isinstance(rows,list):
+                if len(rows)!=count:
+                    raise ValueError("SAM3 frame_results count mismatch")
+                for i,row in enumerate(rows):
+                    if row.get("frame_index")!=i:
+                        raise ValueError("SAM3 frame_results index mismatch")
+                    for obj in row.get("objects",[]):
+                        confidence[(i,int(obj["object_id"]))]=float(obj["score"])
+            elif isinstance(meta.get("object_scores"),list):
+                vals=meta["object_scores"]
+                if frame_index<len(vals) and vals[frame_index] is not None:
+                    confidence[(frame_index,0)]=float(vals[frame_index])
+            seen=set()
+            for n in names:
+                m=re.fullmatch(r"frame_(\d+)_obj_(\d+)(?:_score([0-9.]+))?\.png",n)
+                if m is None or int(m.group(1)) != frame_index:
                     continue
-                a = np.frombuffer(z.read(n), np.uint8)
-                m = cv2.imdecode(a, cv2.IMREAD_GRAYSCALE)
-                if m is None:
-                    continue
-                score = 0.0
-                try:
-                    s = n.rsplit("score", 1)[1].rsplit(".png", 1)[0]
-                    score = float(s)
-                except:
-                    pass
-                masks.append((m > 0, score, n))
+                obj=int(m.group(2))
+                if obj in seen:
+                    raise ValueError("Duplicate SAM3 object for requested frame")
+                seen.add(obj)
+                data=z.read(n)
+                decoded=cv2.imdecode(np.frombuffer(data,np.uint8),cv2.IMREAD_GRAYSCALE)
+                if decoded is None or decoded.shape!=shape:
+                    raise ValueError("SAM3 mask decoding or size mismatch")
+                score=confidence.get((frame_index,obj))
+                if score is None and m.group(3) is not None:
+                    score=float(m.group(3))
+                if score is None or not np.isfinite(score):
+                    raise ValueError("SAM3 mask has no usable confidence value")
+                masks.append((decoded>127,float(score),n))
         return masks
 
     @staticmethod
@@ -167,9 +207,13 @@ class SAM3Client:
         tmp_path = tmp.name
         tmp.close()
         writer = cv2.VideoWriter(tmp_path, fourcc, self.clip_fps, (w, h))
-        for frame in frames:
-            writer.write(frame)
-        writer.release()
+        if not writer.isOpened():
+            raise RuntimeError("Failed to create SAM3 clip MP4")
+        try:
+            for frame in frames:
+                writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        finally:
+            writer.release()
         return tmp_path
 
     def _run(self):
@@ -201,7 +245,7 @@ class SAM3Client:
                     files = {'file': (os.path.basename(clip_path), f, 'video/mp4')}
                     data = {
                         'text_prompt': frames_to_process[-1][3],
-                        'max_frames': str(self.clip_frames),
+                        'max_frames': str(len(frames_to_process)),
                         'frame_stride': '1',
                         'return_masks_png': 'true'
                     }
@@ -214,10 +258,12 @@ class SAM3Client:
                     )
                     r.raise_for_status()
 
-                masks = self._decode_zip_masks(r.content, frame_arrays[0].shape[:2])
+                masks = self._decode_zip_masks(r.content, frame_arrays[0].shape[:2],
+                                               len(frame_arrays) - 1,
+                                               expected_frames=len(frame_arrays))
 
                 if masks:
-                    mask, score, bbox = self._pick(masks, prev_mask)
+                    mask, score, bbox = self._pick(masks, None)
                     prev_mask = mask if mask is not None else prev_mask
                     _, fid, hns, prompt, camera_context = frames_to_process[-1]
                     res = SamResult(fid, hns, mask, score, bbox, (time.perf_counter() - t0) * 1000, "", prompt, camera_context)
@@ -245,6 +291,8 @@ class SAM3Client:
     def close(self):
         self._stop = True
         self._wake.set()
+        if self.thread.is_alive():
+            self.thread.join(timeout=min(self.timeout+2, 20))
 
 
 # 便捷函数

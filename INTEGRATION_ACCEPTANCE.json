@@ -1,0 +1,59 @@
+{
+  "title": "E-Brush RGB-D Semantic Bridge integration",
+  "timestamp_utc": "2026-10-18T16:29:53.629760+00:00",
+  "sources": {
+    "e_brush_zip_sha256": "205dc3884aca6e3a9de8811729c2c1a9e6f4817e98eb257aa42ec2d2b094dafa",
+    "sam3_service_zip_sha256": "f1335020df7d13247201ed4236726bd7c4cdfedbd24f1962bbfd2e8938e01fd6"
+  },
+  "new_modules": [
+    "studio/rgbd_semantic/__init__.py",
+    "studio/rgbd_semantic/adapters.py",
+    "studio/rgbd_semantic/dataset.py",
+    "studio/rgbd_semantic/export.py",
+    "studio/rgbd_semantic/geometry.py",
+    "studio/rgbd_semantic/offline.py",
+    "studio/rgbd_semantic/pipeline.py",
+    "studio/rgbd_semantic/replay.py",
+    "studio/rgbd_semantic/sam3_client.py",
+    "studio/rgbd_semantic/studio_bridge.py",
+    "studio/rgbd_semantic/sync.py",
+    "studio/rgbd_semantic/tracking.py",
+    "studio/rgbd_semantic/types.py"
+  ],
+  "changed_files": [
+    "README.md",
+    "tools/sam3_video_client.py"
+  ],
+  "added_files": [
+    "docs/SAM3_RGBD_INTEGRATION_V2.md",
+    "config/rgbd_semantic.example.json",
+    "tools/annotate_episode_v4.py",
+    "tools/export_rgbd_training.py",
+    "tests/test_rgbd_semantic.py",
+    "tests/test_sam3_http_contract.py"
+  ],
+  "test_status": {
+    "pytest_35": "PASS",
+    "syntax": "PASS",
+    "loopback_http_contract": "PASS",
+    "real_hp60c": "UNVERIFIED",
+    "production_sam3_gpu_inference": "UNVERIFIED",
+    "millimetre_brush_tip_accuracy": "UNVERIFIED",
+    "real_studio_GUI": "MISSING_SOURCE"
+  },
+  "confirmed_missing_from_attachments": [
+    "HP60C vendor SDK and synchronized RGB-D camera capture main loop",
+    "ebrush_python_studio_v06_autodebug GUI project",
+    "VisionPoseEstimator implementation",
+    "Verified camera intrinsics/extrinsics and brush-tip-to-sensor calibration"
+  ],
+  "safety_assurance": [
+    "Candidate-only predictions, independent review required for ACCEPTED export",
+    "Input frame ID matching and mask dimensions checked",
+    "Depth conversion uses explicitly supplied sensor units",
+    "Synchronized host clock required for multi-modal high-trust labels",
+    "Online prediction cannot override unrelated or stale camera frame",
+    "Image/depth archive immutable with hashes and incomplete transaction detection",
+    "SAM3 frozen v4 server not modified"
+  ]
+}

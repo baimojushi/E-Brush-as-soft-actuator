@@ -2,7 +2,9 @@ import argparse,json,sys,time,os,csv
 from collections import deque
 from pathlib import Path
 import numpy as np, cv2
-HERE=Path(__file__).resolve().parent;ROOT=HERE.parent;sys.path.insert(0,str(HERE))
+HERE=Path(__file__).resolve().parent;ROOT=HERE.parent
+sys.path.insert(0,str(HERE))
+sys.path.insert(0,str(ROOT))
 from sources import HP60CSource,BrushSource
 from pose_mapper import PoseMapper
 from core import HotPatch
@@ -56,6 +58,20 @@ class Win(QtWidgets.QMainWindow):
         cfg=json.loads((ROOT/"config"/"vision_validation.json").read_text(encoding="utf-8"));self.cfg=cfg
         self.hp=HP60CSource(ROOT,a.camera_backend);self.hp.start();self.br=BrushSource(ROOT/"vendor"/"ebrush",a.port,a.baud)
         if not a.no_brush:self.br.start()
+        self.rgbd_capture=None
+        self._rgbd_closing=False
+        self._rgbd_close_complete=None
+        self._rgbd_close_error=None
+        self._rgbd_error_acknowledged=False
+        # Start recorder as soon as the camera source is running. Delaying until
+        # all Qt widgets/agent are initialized risks overflowing its 12-frame queue.
+        if a.rgbd_record_episode:
+            try:
+                self._start_rgbd_recording(a)
+            except Exception:
+                self.hp.close()
+                self.br.close()
+                raise
         self.pose=PoseMapper(ROOT/"config"/"ebrush_pose_calibration.json",heading_mode=a.heading_mode)
         self.mapper_debug=MapperDebug(ROOT)
         self.pose_cal=PoseCalibrationSession(ROOT,self.pose,self.mapper_debug)
@@ -147,6 +163,52 @@ class Win(QtWidgets.QMainWindow):
         md.setWidget(mw);self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,md)
         self.t=QtCore.QTimer();self.t.timeout.connect(self.tick);self.t.start(16)
 
+    def _start_rgbd_recording(self,a):
+        """Opt-in recording from the actual existing Studio SDK queue owner."""
+        import queue
+        from studio.rgbd_semantic.studio_capture import (
+            StudioCaptureConfig,StudioCaptureSupervisor)
+        if not a.rgbd_calibration or not a.rgbd_timestamp_unit or a.rgbd_depth_unit_m is None:
+            raise RuntimeError("RGB-D capture requires calibration and validated timestamp/depth units")
+        source=self.hp
+        if not callable(getattr(source,"get_frame",None)):
+            for name in ("direct_sdk","sdk_owner","camera_owner"):
+                candidate=getattr(self.hp,name,None)
+                if candidate is not None and callable(getattr(candidate,"get_frame",None)):
+                    source=candidate
+                    break
+        if not callable(getattr(source,"get_frame",None)):
+            raise RuntimeError(
+                "Studio HP60CSource exposes only poll(). Full data capture needs "
+                "the SAME HP60CDirectSDK.get_frame() queue; do not open a second camera.")
+        sensor=self.br if isinstance(getattr(self.br,"frames",None),queue.Queue) else None
+        config=StudioCaptureConfig(
+            calibration_file=a.rgbd_calibration,
+            episode_dir=a.rgbd_record_episode,
+            timestamp_unit=a.rgbd_timestamp_unit,
+            depth_unit_m=a.rgbd_depth_unit_m,
+            registration_verified=a.rgbd_registration_verified,
+            host_clock_mapping_verified=a.rgbd_host_clock_verified,
+            sam3_url=a.sam3_url or self.cfg["sam3"]["base_url"],
+            sam3_api_key=os.getenv(self.cfg["sam3"].get("api_key_env","SAM3_API_KEY"),""),
+            sam3_prompt=a.sam3_prompt or self.cfg["sam3"]["prompt"],
+            sam3_clip_frames=a.rgbd_clip_frames,
+            enable_sam3=a.rgbd_sam3_background,
+            pose_calibration_file=a.rgbd_pose_calibration,
+        )
+        recorder=StudioCaptureSupervisor(source,config,sensor)
+        # Service liveness must not delay draining a live SDK callback queue.
+        # SAM3 failures are isolated to asynchronous annotation results.
+        recorder.start(check_service=False)
+        self.rgbd_capture=recorder
+
+    def _wait_rgbd_shutdown(self):
+        if self._rgbd_close_complete is not None and self._rgbd_close_complete.is_set():
+            self.close()
+        else:
+            QtCore.QTimer.singleShot(100,self._wait_rgbd_shutdown)
+
+
     def _refresh_hall_profiles(self):
         self.hallcalui.set_profiles(self.hall_cal.list_profiles())
     def _hall_ui_call(self,callback,*args):
@@ -214,8 +276,15 @@ class Win(QtWidgets.QMainWindow):
         if c is not None:
             rgb=c.get("rgb");fid=int(c.get("packet_id",-1));hns=int(c.get("host_ns",time.perf_counter_ns()))
             if rgb is not None and fid!=self.last_submitted:
-                # Exact same packet is retained as context until SAM response returns.
-                self.sam.submit(rgb,fid,hns,camera_context=c);self.last_submitted=fid
+                # One Meta GPU inference job at a time; avoid a second Studio
+                # client when the RGB-D recorder owns low-frequency SAM3 calls.
+                background_sam3=(
+                    self.rgbd_capture is not None
+                    and self.rgbd_capture.config.enable_sam3
+                )
+                if not background_sam3:
+                    self.sam.submit(rgb,fid,hns,camera_context=c)
+                self.last_submitted=fid
 
         sr=self.sam.latest()
         if sr is not None and sr.frame_id!=self.last_sam_result:
@@ -241,6 +310,8 @@ class Win(QtWidgets.QMainWindow):
         self.rgb.set(o.get("rgb"))
         self.dep.set(o.get("depth"))
         rs={"camera":self.hp.status(),"brush_port":self.br.port,"brush_error":self.br.error,"reference":self.pose.reference_state,"sam_last_frame":self.last_sam_result,"sam_prompt":self.sam.prompt,"camera_to_board_enabled":self.Rbc is not None}
+        if self.rgbd_capture is not None:
+            rs["rgbd_recording"]=self.rgbd_capture.status()
         self.status.setPlainText(json.dumps(rs,ensure_ascii=False,indent=2))
         self.agent.publish("camera",rs["camera"]);self.agent.publish("brush",{"port":self.br.port,"error":self.br.error})
         self.agent.publish("pose",self.state.get("pose") or {"reference_state":self.pose.reference_state,"reference_locked":False})
@@ -257,11 +328,64 @@ class Win(QtWidgets.QMainWindow):
         now=time.monotonic()
         if now-self._last_agent_flush>=1:self.agent.flush_state();self._last_agent_flush=now
 
-    def closeEvent(self,e):self.agent.close();self.sam.close();self.hp.close();self.br.close();super().closeEvent(e)
+    def closeEvent(self,e):
+        if self.rgbd_capture is not None:
+            if not self._rgbd_closing:
+                import threading
+                self._rgbd_closing=True
+                self._rgbd_close_complete=threading.Event()
+                # Stop SDK producer before draining its bounded queue.
+                # Qt interface stays open until archival shutdown completes.
+                self.t.stop()
+                try:
+                    self.hp.close()
+                except Exception as exc:
+                    self._rgbd_close_error=f"SDK close failed: {type(exc).__name__}: {exc}"
+                def finalize():
+                    try:
+                        self.rgbd_capture.close(timeout_s=240)
+                    except Exception as exc:
+                        self._rgbd_close_error=f"{type(exc).__name__}: {exc}"
+                    finally:
+                        self._rgbd_close_complete.set()
+                threading.Thread(
+                    target=finalize,name="StudioRGBDShutdown",daemon=True).start()
+                e.ignore()
+                self._wait_rgbd_shutdown()
+                return
+            if not self._rgbd_close_complete.is_set():
+                e.ignore()
+                return
+            if self._rgbd_close_error and not self._rgbd_error_acknowledged:
+                self._rgbd_error_acknowledged=True
+                QtWidgets.QMessageBox.warning(
+                    self,"RGB-D 录制不完整",
+                    "请隔离本次 episode，禁止直接导出训练标签。\n"+
+                    self._rgbd_close_error)
+                e.ignore()
+                return
+        self.t.stop()
+        self.agent.close()
+        self.sam.close()
+        if self.rgbd_capture is None:
+            self.hp.close()
+        self.br.close()
+        super().closeEvent(e)
 
 def main():
     p=argparse.ArgumentParser();p.add_argument("--camera-backend",choices=["direct","shm","none"],default="direct");p.add_argument("--port");p.add_argument("--baud",type=int,default=921600)
     p.add_argument("--heading-mode",choices=["startup_reference","relative","calibration_session"],default="startup_reference");p.add_argument("--no-brush",action="store_true")
-    p.add_argument("--sam3-url");p.add_argument("--sam3-prompt");p.add_argument("--agent-host",default="127.0.0.1");p.add_argument("--agent-port",type=int,default=8765);a=p.parse_args()
+    p.add_argument("--sam3-url");p.add_argument("--sam3-prompt");p.add_argument("--agent-host",default="127.0.0.1");p.add_argument("--agent-port",type=int,default=8765)
+    p.add_argument("--rgbd-record-episode",default=None,
+                   help="Explicit opt-in: new empty RGB-D episode")
+    p.add_argument("--rgbd-calibration",default=None)
+    p.add_argument("--rgbd-registration-verified",action="store_true")
+    p.add_argument("--rgbd-timestamp-unit",choices=("ns","us","ms"))
+    p.add_argument("--rgbd-depth-unit-m",type=float,default=None)
+    p.add_argument("--rgbd-host-clock-verified",action="store_true")
+    p.add_argument("--rgbd-clip-frames",type=int,default=5)
+    p.add_argument("--rgbd-sam3-background",action="store_true")
+    p.add_argument("--rgbd-pose-calibration",default=None)
+    a=p.parse_args()
     q=QtWidgets.QApplication(sys.argv);w=Win(a);w.show();return q.exec()
 if __name__=="__main__":raise SystemExit(main())
