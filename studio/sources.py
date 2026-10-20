@@ -15,7 +15,7 @@ class HP60CSource:
                 original_sdk = r"D:\Express Program Files\Angstrong Viewer V2.1.10_240109\Angstrong Viewer V2.1.10_240109\RelWithDebInfo"
                 self.impl=HP60CDirectSDK(Path(original_sdk));self.impl.start()
             else:
-                d=self.root/"vendor"/"hp60c_v13";sys.path.insert(0,str(d));import hp60c_shm_reader_v13 as r;self.impl=r.Reader()
+                d=self.root.parent/"hp60c_v13";sys.path.insert(0,str(d));import hp60c_shm_reader_v13 as r;self.impl=r.Reader()
         except Exception as e:self.error=f"{type(e).__name__}: {e}";self.impl=None
     def poll(self):
         if not self.impl:return None
@@ -97,8 +97,8 @@ class BrushSerial:
             self.ser.close()
 
 class BrushSource:
-    def __init__(self, vendor_dir, port=None, baud=921600, auto_reconnect=True):
-        self.vendor_dir = Path(vendor_dir)
+    def __init__(self, root_dir, port=None, baud=921600, auto_reconnect=True):
+        self.root_dir = Path(root_dir)
         self.port = port
         self.baud = baud
         self.auto_reconnect = auto_reconnect
@@ -112,9 +112,9 @@ class BrushSource:
         
     def start(self):
         try:
-            if str(self.vendor_dir) not in sys.path:
-                sys.path.insert(0, str(self.vendor_dir))
-            from studio.brush_serial import BrushSerial as StudioBrushSerial
+            if str(self.root_dir / "studio") not in sys.path:
+                sys.path.insert(0, str(self.root_dir / "studio"))
+            from brush_serial import BrushSerial as StudioBrushSerial
             if self.port is None:
                 self.port = auto_detect_port(verbose=True)
             self._connect_brush()
