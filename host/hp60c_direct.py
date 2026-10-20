@@ -125,20 +125,7 @@ class HP60CDirectSDK:
         if self.cam.get_serial_number(self.handle, sn, 128) == 0:
             self.serial = sn.value.decode(errors="replace")
 
-        @sdk.StreamCb
-        def dummy(c, d, p):
-            pass
-        self._dummy = dummy
-        cb = sdk.AS_CAM_Stream_Cb_s(dummy, None)
-        r = self.cam.register_stream_callback(self.handle, ctypes.byref(cb))
-        if r:
-            raise RuntimeError(f"dummy callback failed {r}")
-        r = self.cam.start_stream(self.handle, sdk.IMG_RGB | sdk.IMG_DEPTH)
-        if r:
-            raise RuntimeError(f"warmup failed {r}")
-        time.sleep(2)
-        self.cam.stop_stream(self.handle, 0)
-
+        # 简化初始化：直接设置流参数，跳过 warmup（参考 Variant A 成功案例）
         sp = sdk.AS_STREAM_Param_s()
         sp.width = 640
         sp.height = 480
@@ -146,7 +133,7 @@ class HP60CDirectSDK:
         r = self.cam.set_stream_param(self.handle, sdk.MEDIA_TYPE_DEPTH, ctypes.byref(sp))
         if r:
             raise RuntimeError(f"640x480@30 rejected {r}")
-        self.cam.set_timestamp_type(self.handle, sdk.TS_STEADY_CLOCK)
+        # 不设置 timestamp_type（避免 MF 状态污染）
 
         @sdk.StreamCb
         def callback(c, pdata, priv):

@@ -1,0 +1,15 @@
+Attached: True
+State: ONLINE
+Worker PID: 11828
+Generation: 7
+Worker State: 2
+Packet ID: 1065
+RGB Valid: True
+Depth Valid: True
+PointCloud Valid: True
+Frame Age (ms): 49.5796
+Packet ID: 1065
+RGB: (480, 640, 3)
+Depth: (480, 640)
+Depth min/max: 0 3252
+PointCloud: (258443, 3)
