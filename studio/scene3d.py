@@ -8,12 +8,12 @@ def _empty(item):
 
 def _make_brush_stroke(segments=12, length=1.0, base_width=0.12, tip_width=0.02):
     """Return (positions, colors) for a tapered brush stroke along +Z axis.
-    Tapers from base (wider) to tip (narrower), like a calligraphy brush stroke.
+    Along brush +Z from bristle tip (narrow) toward the ferrule (wider).
     """
     # Generate centerline points along Z axis
     z_vals = np.linspace(0, length, segments + 1)
     # Width tapers from base to tip
-    widths = np.linspace(base_width, tip_width, segments + 1)
+    widths = np.linspace(tip_width, base_width, segments + 1)
     
     # Build a quad strip along the centerline (4 vertices per segment: left-bottom, right-bottom, left-top, right-top)
     # But for a line plot, we'll create a thick line with varying width using multiple parallel lines
@@ -102,8 +102,10 @@ class Scene3D(QtWidgets.QWidget):
         # --- NEW: IMU Orientation Cube (3-axis attitude simulation) ---
         self.imu_cube = gl.GLLinePlotItem(width=3, antialias=True)
         self.imu_axes = gl.GLLinePlotItem(width=4, antialias=True)
+        self.r0_marker = gl.GLLinePlotItem(width=6, antialias=True)
         self.view.addItem(self.imu_cube)
         self.view.addItem(self.imu_axes)
+        self.view.addItem(self.r0_marker)
         self.imu_cube_scale = 80.0  # mm
         self.imu_axes_len = 120.0   # mm
         
@@ -139,7 +141,7 @@ class Scene3D(QtWidgets.QWidget):
 
     def update_scene(self, camera=None, pose=None, vision=None, hall=None):
         O=np.zeros(3)
-        for item in [self.imu,self.vis,*self.axes,*self.hall_local_axes,*self.hall_local_zero,self.world_flux_mean,self.world_flux_inst,self.imu_cube,self.imu_axes]:
+        for item in [self.imu,self.vis,*self.axes,*self.hall_local_axes,*self.hall_local_zero,self.world_flux_mean,self.world_flux_inst,self.imu_cube,self.imu_axes,self.r0_marker]:
             _empty(item)
         self.world_flux_cloud.setData(pos=np.empty((0,3)), size=5, color=(0.0,0.0,0.0,0.0))
         hall_txt="霍尔：无数据"
@@ -156,11 +158,12 @@ class Scene3D(QtWidgets.QWidget):
                 q = np.array([pose["brush_q_w"], pose["brush_q_x"], pose["brush_q_y"], pose["brush_q_z"]], float)
                 R = _quat_to_R(q)
                 
-                # Render brush stroke at brush tip (along shaft direction)
-                # Stroke extends from base (at tip) forward along +Z (brush shaft)
-                stroke_pos = O + z * 260.0  # start at brush tip
-                # Scale: 200mm long, base width ~25mm, tip width ~4mm
-                stroke_verts, stroke_colors = _make_brush_stroke(segments=16, length=200.0, base_width=25.0, tip_width=4.0)
+                # Brush +Z is tip -> tail. Bristles start at the paper tip (O)
+                # and widen toward the ferrule, NOT beyond the tail.
+                stroke_pos = O
+                stroke_verts, stroke_colors = _make_brush_stroke(
+                    segments=16, length=65.0, base_width=23.0, tip_width=2.5
+                )
                 # Rotate and translate: stroke local +Z aligns with brush shaft (z)
                 stroke_verts = (R @ stroke_verts.T).T + stroke_pos
                 self.imu_cube.setData(pos=stroke_verts, color=stroke_colors)
@@ -187,6 +190,7 @@ class Scene3D(QtWidgets.QWidget):
             else:
                 _empty(self.imu_cube)
                 _empty(self.imu_axes)
+                _empty(self.r0_marker)
                 self.euler_info.setText("IMU 姿态：等待四元数数据")
             
             if hall and hall.get("present") and hall.get("runtime_mapping",{}).get("compatible",True):
@@ -228,9 +232,10 @@ class Scene3D(QtWidgets.QWidget):
             _empty(self.imu)
             _empty(self.imu_cube)
             _empty(self.imu_axes)
+            _empty(self.r0_marker)
             for item in self.axes:
                 _empty(item)
-            self.euler_info.setText("IMU 姿态：等待参考锁定 (UP_R0 静止 1.5s)")
+            self.euler_info.setText("等待 UP0 确认与参考锁定：笔尖向下、笔尾向上，R0 朝纸面 +X")
         
         if vision and vision.get("ok") and "axis_camera" in vision:
             a=np.asarray(vision["axis_camera"],float)
@@ -238,4 +243,4 @@ class Scene3D(QtWidgets.QWidget):
             ln=float(vision.get("visible_length_mm",220) or 220)
             self.vis.setData(pos=np.vstack([o-a*ln*.5,o+a*ln*.5]),color=(1,1,0,1))
         self._draw_pointcloud(camera)
-        self.info.setText("白色=IMU 映射 | 黄色=视觉（相机坐标系） | RGB=毛笔局部轴 | 笔杆上的粗红绿蓝=局部霍尔瞬时分量（居中） | 左下角青/黄=世界磁通均值/瞬时 | 纸面网格=700 mm | 蓝/红/绿立方体=IMU 三轴姿态 | "+hall_txt)
+        self.info.setText("白色=IMU 映射 | 黄色=视觉（相机坐标系） | RGB=毛笔局部轴 | 黄色短线=R0 +X 标记 | 笔杆上的粗红绿蓝=局部霍尔瞬时分量（居中） | 左下角青/黄=世界磁通均值/瞬时 | 纸面网格=700 mm | 蓝/红/绿立方体=IMU 三轴姿态 | "+hall_txt)

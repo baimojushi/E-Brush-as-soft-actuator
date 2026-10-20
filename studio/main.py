@@ -250,12 +250,12 @@ class Win(QtWidgets.QMainWindow):
         # Sources
         self.hp = HP60CSource(ROOT, a.camera_backend)
         self.hp.start()
-        self.br = BrushSource(ROOT, a.port, a.baud)
+        self.br = BrushSource(ROOT/"vendor"/"ebrush", a.port, a.baud)
         if not a.no_brush:
             self.br.start()
 
         # Core pipelines
-        self.pose = PoseMapper(ROOT/"config"/"ebrush_pose_calibration.json", heading_mode=a.heading_mode)
+        self.pose = PoseMapper(ROOT/"config"/"ebrush_pose_calibration.json", heading_mode=a.heading_mode, reference_enabled=False)
         self.mapper_debug = MapperDebug(ROOT)
         self.pose_cal = PoseCalibrationSession(ROOT, self.pose, self.mapper_debug)
         self.hall = HallMountModel(ROOT)
@@ -380,8 +380,8 @@ class Win(QtWidgets.QMainWindow):
         self.status.setReadOnly(True)
         self.status.setMaximumHeight(200)
 
-        b = QtWidgets.QPushButton("Reset UP_R0 reference")
-        b.clicked.connect(self.pose.reset_reference)
+        b = QtWidgets.QPushButton("重新开始 UP0 校准")
+        b.clicked.connect(lambda: self._cal_ui_call(self.pose_cal.start))
         h = QtWidgets.QPushButton("检查 SAM3")
         h.clicked.connect(self.check_health)
 
@@ -465,10 +465,11 @@ class Win(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, md)
 
         # Calibration panels connections
-        self.calui.startRequested.connect(lambda: self.pose_cal.start())
-        self.calui.advanceRequested.connect(lambda: self.pose_cal.advance())
-        self.calui.retryRequested.connect(lambda: self.pose_cal.retry())
-        self.calui.cancelRequested.connect(lambda: self.pose_cal.cancel())
+        self.calui.startRequested.connect(lambda: self._cal_ui_call(self.pose_cal.start))
+        self.calui.advanceRequested.connect(lambda: self._cal_ui_call(self.pose_cal.advance))
+        self.calui.retryRequested.connect(lambda: self._cal_ui_call(self.pose_cal.retry))
+        self.calui.cancelRequested.connect(lambda: self._cal_ui_call(self.pose_cal.cancel))
+        self.calui.confirmUp0Requested.connect(lambda: self._cal_ui_call(self.pose_cal.confirm_up0))
         self.calui.commitRequested.connect(self._cal_commit)
         self.calui.loadRequested.connect(self._cal_load)
         self._refresh_cal_profiles()
@@ -577,7 +578,8 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- Agent commands ----
     def _register_agent_commands(self):
-        self.agent.register_command("reset_reference", lambda x: (self.pose.reset_reference() or {"ok": True}), "重置 UP_R0")
+        self.agent.register_command("reset_reference", lambda x: (self.pose.disarm_reference() or {"ok": True, "state": "WAITING_FOR_UP0_CONFIRMATION"}), "撤销参考；须重新确认 UP0")
+        self.agent.register_command("calibration.confirm_up0", lambda a: self.pose_cal.confirm_up0(), "人工确认 R0 朝 +X 并开始采样")
         self.agent.register_command("sam3_health", lambda x: self.sam.health(), "SAM3 /health")
         self.agent.register_parameter("sam3.prompt", lambda: self.sam.prompt, lambda v: (setattr(self.sam, "prompt", str(v)) or self.sam.prompt), "SAM3 text prompt", "string")
         self.agent.register_parameter("sam3.clip_frames", lambda: self.sam.clip_frames, lambda v: (setattr(self.sam, "clip_frames", int(v)) or self.sam.clip_frames), "SAM3 clip frames", "int")
@@ -592,7 +594,7 @@ class Win(QtWidgets.QMainWindow):
         self.agent.register_command("mapper.load", lambda a: self.mapper_debug.load(a["name"]), "Rollback/load mapper version")
         self.agent.register_command("mapper.list", lambda a: self.mapper_debug.list_versions(), "List mapper versions")
         self.agent.register_command("calibration.start", lambda a: self.pose_cal.start(), "Start pose mapping calibration")
-        self.agent.register_command("calibration.next", lambda a: self.pose_cal.advance(), "Advance/skip calibration stage")
+        self.agent.register_command("calibration.next", lambda a: self.pose_cal.advance(), "Advance only if current calibration stage passed")
         self.agent.register_command("calibration.retry", lambda a: self.pose_cal.retry(), "Retry current calibration stage")
         self.agent.register_command("calibration.cancel", lambda a: self.pose_cal.cancel(), "Cancel calibration")
         self.agent.register_command("calibration.commit", lambda a: self.pose_cal.commit(a.get("name")), "Commit mapping profile")
@@ -619,12 +621,28 @@ class Win(QtWidgets.QMainWindow):
         b = self.br.latest()
         if b:
             self.state["brush"] = b
-            self.state["pose"] = self.mapper_debug.apply(self.pose.map_frame(b))
-            self.state["hall"] = self.hall.process(b, self.state.get("pose"))
-            self.hall_cal.update(b, self.state.get("pose"))
-            if self.state["hall"] is not None:
-                self.state["hall"]["runtime_mapping"] = self.hall_cal.runtime_mapping_status()
-            self.pose_cal.update(b, self.state.get("pose"))
+            raw_pose = self.pose.map_frame(b)
+            # A GUI tick is NOT a fresh sensor sample. Do not let one serial
+            # frame count toward stillness, UP0, or Hall calibration repeatedly.
+            if raw_pose is not None and raw_pose.get("frame_fresh", True):
+                mapped_pose = self.mapper_debug.apply(raw_pose)
+                self.pose_cal.update(b, mapped_pose)
+                # Entering UP0 (or losing the reference) can disarm the mapper
+                # during this very tick; never show an old "locked" pose.
+                if not self.pose.reference_locked and mapped_pose.get("reference_locked"):
+                    mapped_pose = dict(raw_pose)
+                    mapped_pose.update({"reference_locked": False,
+                                        "reference_state": self.pose.reference_state})
+                    for k in list(mapped_pose):
+                        if k.startswith(("brush_axis_", "brush_x_axis_", "brush_y_axis_", "brush_q_",
+                                         "tilt_x_", "tilt_y_", "omega_")) or k in (
+                                "shaft_azimuth_deg", "heading_rel_deg", "roll_about_brush_rel_deg"):
+                            mapped_pose.pop(k, None)
+                self.state["pose"] = mapped_pose
+                self.state["hall"] = self.hall.process(b, mapped_pose)
+                self.hall_cal.update(b, mapped_pose)
+                if self.state["hall"] is not None:
+                    self.state["hall"]["runtime_mapping"] = self.hall_cal.runtime_mapping_status()
         else:
             self.state["hall"] = None
 
@@ -725,6 +743,23 @@ class Win(QtWidgets.QMainWindow):
             self._last_agent_flush = now
 
     # ---- Calibration UI callbacks ----
+    def _cal_ui_call(self, callback):
+        try:
+            result = callback()
+            # Disarming immediately removes any previously rendered pose;
+            # the next new IMU sample will refresh the full diagnostics.
+            if not self.pose.reference_locked:
+                self.state["pose"] = {
+                    "reference_locked": False,
+                    "reference_state": self.pose.reference_state,
+                    "heading_absolute": False,
+                }
+            self.calui.update_state(self.pose_cal.state())
+            return result
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "UP0 姿态校准", str(e))
+            return None
+
     def _refresh_hall_profiles(self):
         self.hallcalui.set_profiles(self.hall_cal.list_profiles())
 
