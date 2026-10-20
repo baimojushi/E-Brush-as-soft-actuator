@@ -250,7 +250,7 @@ class Win(QtWidgets.QMainWindow):
         # Sources
         self.hp = HP60CSource(ROOT, a.camera_backend)
         self.hp.start()
-        self.br = BrushSource(ROOT/"vendor"/"ebrush", a.port, a.baud)
+        self.br = BrushSource(ROOT.parent, a.port, a.baud)
         if not a.no_brush:
             self.br.start()
 
