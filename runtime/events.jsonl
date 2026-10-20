@@ -1,0 +1,3 @@
+{"t_unix": 1792523067.8575172, "event": "agent_control_started", "host": "127.0.0.1", "port": 8765, "schema": "ebrush.agent.v1"}
+{"t_unix": 1792524145.6026626, "event": "agent_control_started", "host": "127.0.0.1", "port": 8765, "schema": "ebrush.agent.v1"}
+{"t_unix": 1792525998.3709283, "event": "agent_control_started", "host": "127.0.0.1", "port": 8765, "schema": "ebrush.agent.v1"}

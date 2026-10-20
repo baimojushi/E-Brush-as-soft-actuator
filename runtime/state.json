@@ -1,0 +1,124 @@
+{
+  "meta": {
+    "schema": "ebrush.agent.v1",
+    "started_unix": 1792525998.3669293,
+    "pid": 10900,
+    "updated_unix": 1792526012.1840448
+  },
+  "camera": {
+    "state": "OFFLINE",
+    "attached": false,
+    "heartbeat_age_ms": null,
+    "frame_age_ms": null,
+    "reason": "shared_memory_not_present"
+  },
+  "brush": {
+    "port": null,
+    "error": ""
+  },
+  "pose": {
+    "reference_state": "WAITING_FOR_UP0_CONFIRMATION",
+    "reference_locked": false
+  },
+  "sam3": {
+    "last_frame": -1,
+    "prompt": "calligraphy brush",
+    "last_error": "waiting",
+    "latency_ms": null,
+    "score": null
+  },
+  "vision": {
+    "ok": false,
+    "reason": "waiting"
+  },
+  "validation": {},
+  "mapper": {
+    "schema": "ebrush.mapper_debug.v1",
+    "board_xyz_deg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "brush_xyz_deg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_version": null,
+    "formula": "R_board_debug @ R_mapper @ R_brush_debug"
+  },
+  "calibration": {
+    "schema": "ebrush.pose_calibration_session.v2",
+    "stage": "IDLE",
+    "message": "Ready",
+    "started_unix": null,
+    "quality_score": 0,
+    "results": {},
+    "up0_definition": {
+      "tip": "down_toward_paper",
+      "shaft": "vertical",
+      "tail": "up_away_from_paper",
+      "brush_plus_z": "tip_to_tail_same_as_board_plus_z",
+      "r0_index_mark": "toward_board_plus_x_writer_right",
+      "r0_verified_by": "manual_confirmation_not_six_axis_imu"
+    },
+    "up0_confirmation_required": false,
+    "reference_state": "WAITING_FOR_UP0_CONFIRMATION",
+    "mapper": {
+      "schema": "ebrush.mapper_debug.v1",
+      "board_xyz_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "brush_xyz_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "active_version": null,
+      "formula": "R_board_debug @ R_mapper @ R_brush_debug"
+    },
+    "can_commit": false,
+    "limitations": {
+      "heading_absolute": false,
+      "roll_absolute_verified": false,
+      "r0_index_mark_sensor_verified": false
+    }
+  },
+  "hall": {
+    "present": false
+  },
+  "hall_extrinsic": {
+    "schema": "ebrush.hall_extrinsic_session.v1",
+    "stage": "IDLE",
+    "message": "准备就绪；请先完成 UP_R0 并锁定 PoseMapper 参考",
+    "armed": false,
+    "pending_frames": 0,
+    "pending_hold_s": 0.0,
+    "train_count": 0,
+    "train_target": 8,
+    "validation_count": 0,
+    "validation_target": 3,
+    "can_solve": false,
+    "can_commit": false,
+    "candidate": null,
+    "validation": null,
+    "source_mount_method": "single_static_pose_underconstrained_identity_seed",
+    "active_profile": null,
+    "runtime_mapping": {
+      "compatible": true,
+      "verified": false,
+      "warning": "当前使用初始或未验证的 Hall 外参"
+    },
+    "rejected_frames": 0,
+    "accepted_frames": 0
+  },
+  "scene3d": {
+    "imu_pose_available": false,
+    "vision_pose_available": false,
+    "camera_to_board_enabled": false,
+    "hall_present": false,
+    "note": "vision geometry remains camera-frame until camera_to_board is enabled"
+  }
+}

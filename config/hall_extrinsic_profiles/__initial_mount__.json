@@ -1,0 +1,71 @@
+{
+  "schema": "ebrush.hall_extrinsic_baseline.v1",
+  "name": "__initial_mount__",
+  "created_unix": 1792523067.8245196,
+  "mount_config": {
+    "schema": "ebrush.hall_mount.v2",
+    "method": "single_static_pose_underconstrained_identity_seed",
+    "created_from": "user_static_mean_2s_400frames_200Hz",
+    "hall_mean_mT": {
+      "bx": -0.2042,
+      "by": -0.1026,
+      "bz": -0.1427,
+      "B_total": 0.2702
+    },
+    "hall_std_mT": {
+      "bx": 0.0184,
+      "by": 0.017,
+      "bz": 0.0105
+    },
+    "imu_quaternion_mean_wxyz": [
+      0.713603,
+      -0.034366,
+      0.699229,
+      0.025871
+    ],
+    "brush_axis_world_mean": [
+      0.0208,
+      -0.0111,
+      -0.9997
+    ],
+    "R_brush_from_hall": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "limitations": {
+      "fully_observable": false,
+      "note": "Single static Hall vector does not determine full Hall→Brush extrinsics. v1.1 keeps an explicit seed mount and uses the physically correct world-field model B_world = R_world_from_brush @ R_brush_from_hall @ B_hall."
+    }
+  },
+  "R_brush_from_hall": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "note": "升级前的原始 Hall 安装方向；未经过多姿态外参验证"
+}
