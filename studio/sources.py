@@ -58,6 +58,11 @@ class HP60CSource:
         self._supervisor_retry = self.SUPERVISOR_RETRY_MIN_S
         self._supervisor_next_start = 0.0
 
+    def _pipeline_dir(self, name):
+        """Prefer the copy inside this repo, fall back to the project sibling."""
+        local = self.root / name
+        return local if local.is_dir() else self.root.parent / name
+
     def _make_impl(self):
         if self._open_impl is not None:
             return self._open_impl()
@@ -72,7 +77,7 @@ class HP60CSource:
             return impl
         if self.backend != "shm":
             raise ValueError(f"unknown camera backend: {self.backend}")
-        d = self.root.parent / "hp60c_v13"
+        d = self._pipeline_dir("hp60c_v13")
         if str(d) not in sys.path:
             sys.path.insert(0, str(d))
         import hp60c_shm_reader_v13 as reader
@@ -179,7 +184,7 @@ class HP60CSource:
 
     def _spawn_supervisor(self):
         """Start the camera pipeline that feeds the shared memory we consume."""
-        shm_dir = self.root.parent / "hp60c_v13"
+        shm_dir = self._pipeline_dir("hp60c_v13")
         sup_py = shm_dir / "hp60c_supervisor_v13.py"
         if not sup_py.is_file():
             self._supervisor_error = f"缺少 {sup_py}"
@@ -194,7 +199,7 @@ class HP60CSource:
         cmd = [python, "-u", str(sup_py), "--python", python,
                "--mode", mode, "--startup-timeout-s", "120"]
         if mode == "legacy":
-            cmd += ["--legacy-dir", str(self.root.parent / "hp60c_ndi_sender"),
+            cmd += ["--legacy-dir", str(self._pipeline_dir("hp60c_ndi_sender")),
                     "--legacy-module", "hp60c_td_bridge_v7"]
         try:
             self._supervisor = subprocess.Popen(

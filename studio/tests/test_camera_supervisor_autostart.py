@@ -6,7 +6,14 @@ from pathlib import Path
 
 ROOT = Path(r"D:\项目\交互艺术\书法微更新\e-Brush")
 sys.path.insert(0, str(ROOT / "studio"))
+sys.path.insert(0, str(ROOT / "hp60c_v13"))
 os.environ["HP60C_SUPERVISOR_MODE"] = "mock"
+import hp60c_shm_reader_v13 as shm_reader  # noqa: E402
+
+if shm_reader.get_status().get("attached"):
+    print("SKIP: a live HP60C pipeline already owns the shared memory")
+    raise SystemExit(0)
+
 from sources import HP60CSource  # noqa: E402
 
 HP60CSource.RECONNECT_TICK_S = 0.05
