@@ -1,0 +1,17 @@
+{
+  "schema": "ebrush.mapper_debug.v1",
+  "board_xyz_deg": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "brush_xyz_deg": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "active_version": null,
+  "formula": "R_board_debug @ R_mapper @ R_brush_debug",
+  "name": "随采演示",
+  "saved_unix": 1792537780.3615046
+}

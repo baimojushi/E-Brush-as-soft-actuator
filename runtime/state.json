@@ -1,37 +1,54 @@
 {
   "meta": {
     "schema": "ebrush.agent.v1",
-    "started_unix": 1792525998.3669293,
-    "pid": 10900,
-    "updated_unix": 1792526012.1840448
+    "started_unix": 1792540325.406128,
+    "pid": 14196,
+    "updated_unix": 1792541245.0903144
   },
   "camera": {
     "state": "OFFLINE",
     "attached": false,
-    "heartbeat_age_ms": null,
-    "frame_age_ms": null,
-    "reason": "shared_memory_not_present"
+    "reason": "",
+    "backend": "shm",
+    "auto_reconnect": true,
+    "reconnect_attempts": 3,
+    "retry_in_s": 0.0,
+    "frames_delivered": 6480,
+    "last_frame_age_s": null,
+    "supervisor_autostart": true,
+    "supervisor_pid": null,
+    "supervisor_starts": 0,
+    "supervisor_error": null
   },
   "brush": {
-    "port": null,
-    "error": ""
+    "port": "COM7",
+    "error": "SerialException: could not open port 'COM7': FileNotFoundError(2, '系统找不到指定的文件。', None, 2)",
+    "streaming_data": false,
+    "valid_data_frames": 0,
+    "frame_id": null,
+    "device_status_names": null
   },
   "pose": {
-    "reference_state": "WAITING_FOR_UP0_CONFIRMATION",
+    "reference_state": "LOCKED_RESTORED",
     "reference_locked": false
   },
   "sam3": {
-    "last_frame": -1,
+    "last_frame": 7345,
     "prompt": "calligraphy brush",
-    "last_error": "waiting",
-    "latency_ms": null,
-    "score": null
+    "last_error": "ReadTimeout: HTTPSConnectionPool(host='desktop-kc6mgc1.tailb2b872.ts.net', port=443): Read timed out. (read timeout=30.0)",
+    "latency_ms": 30405.536300000676,
+    "score": 0
   },
   "vision": {
-    "ok": false,
-    "reason": "waiting"
+    "sam_frame_id": 7345,
+    "sam_error": "ReadTimeout: HTTPSConnectionPool(host='desktop-kc6mgc1.tailb2b872.ts.net', port=443): Read timed out. (read timeout=30.0)",
+    "sam_latency_ms": 30405.536300000676
   },
-  "validation": {},
+  "validation": {
+    "sam_frame_id": 7345,
+    "sam_error": "ReadTimeout: HTTPSConnectionPool(host='desktop-kc6mgc1.tailb2b872.ts.net', port=443): Read timed out. (read timeout=30.0)",
+    "sam_latency_ms": 30405.536300000676
+  },
   "mapper": {
     "schema": "ebrush.mapper_debug.v1",
     "board_xyz_deg": [
@@ -44,7 +61,7 @@
       0.0,
       0.0
     ],
-    "active_version": null,
+    "active_version": "演示1",
     "formula": "R_board_debug @ R_mapper @ R_brush_debug"
   },
   "calibration": {
@@ -63,7 +80,7 @@
       "r0_verified_by": "manual_confirmation_not_six_axis_imu"
     },
     "up0_confirmation_required": false,
-    "reference_state": "WAITING_FOR_UP0_CONFIRMATION",
+    "reference_state": "LOCKED_RESTORED",
     "mapper": {
       "schema": "ebrush.mapper_debug.v1",
       "board_xyz_deg": [
@@ -76,7 +93,7 @@
         0.0,
         0.0
       ],
-      "active_version": null,
+      "active_version": "演示1",
       "formula": "R_board_debug @ R_mapper @ R_brush_debug"
     },
     "can_commit": false,

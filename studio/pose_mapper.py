@@ -52,6 +52,10 @@ def Rz(rad):
     c,s=math.cos(rad),math.sin(rad)
     return np.array([[c,-s,0],[s,c,0],[0,0,1]],float)
 
+def _yaw_deg(R):
+    """Board-frame yaw of a yaw-only (Rz) rotation, in degrees."""
+    return math.degrees(math.atan2(float(R[1,0]),float(R[0,0])))
+
 def _shortest_z_frame(z):
     """Rotation taking board +Z to shaft z with minimum twist."""
     z=_norm(z); ez=np.array([0.,0.,1.]); c=float(np.dot(ez,z))
@@ -75,7 +79,9 @@ class PoseMapper:
                  ref_gyro_max_rad_s=0.08, ref_accel_error_max=0.35,
                  ref_vertical_max_deg=8.0, stale_ms=250.0,
                  imu_mount_correction=None, reference_enabled=True,
-                 reference_min_samples=20, ref_spread_max_deg=3.0):
+                 reference_min_samples=20, ref_spread_max_deg=3.0,
+                 restore_reference=None, auto_restore_tolerance_deg=30.0,
+                 persist_reference_path=None):
         if isinstance(calibration,(str,Path)):
             calibration=json.loads(Path(calibration).read_text(encoding="utf-8"))
         self.cal=calibration
@@ -103,6 +109,14 @@ class PoseMapper:
         self.reference_enabled=bool(reference_enabled)
         self.reference_min_samples=int(reference_min_samples)
         self.ref_spread_max=float(ref_spread_max_deg)
+        # Auto-restore: adopt the saved R0 only if the live upright pose agrees.
+        self._restore_R=(None if restore_reference is None
+                         else np.asarray(restore_reference,float).reshape(3,3))
+        self._restore_tol=float(auto_restore_tolerance_deg)
+        self._restore_pending=bool(self._restore_R is not None and self.reference_enabled)
+        self._restore_failed=""
+        self._persist_path=(Path(persist_reference_path)
+                            if persist_reference_path else None)
         self._last_token=None
         self._last_sample_us=None
         self._last_host_ns=None
@@ -122,6 +136,8 @@ class PoseMapper:
         self.reference_locked=False
         self.reference_state=("WAITING_FOR_STILL_UP_R0" if self.reference_enabled
                               else "WAITING_FOR_UP0_CONFIRMATION")
+        self._restore_pending=bool(self._restore_R is not None and self.reference_enabled)
+        self._restore_failed=""
         self.R_board_from_fusion=None
         self._ref_q=[]
         self._ref_valid_t0=None
@@ -136,12 +152,32 @@ class PoseMapper:
             raise RuntimeError("UP0 arming requires startup_reference mode")
         self.reference_enabled=True
         self.reset_reference()
+        self._restore_pending=False  # a manual confirmation outranks the saved R0
+
+    def _persist_locked_reference(self):
+        """Store the live R0 so the next launch can restore it without a click."""
+        if self._persist_path is None or self.R_board_from_fusion is None:
+            return
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            self._persist_path.write_text(json.dumps({
+                "schema":"ebrush.up0_reference.v1",
+                "saved_unix":time.time(),
+                "reference_state":self.reference_state,
+                "R_board_from_fusion":self.R_board_from_fusion.tolist(),
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _reference_update(self,q,Rf_b,aerr,gyro_norm,now,imu_data_valid=True):
         if self.reference_locked:
             return
         if not self.reference_enabled:
             self.reference_state="WAITING_FOR_UP0_CONFIRMATION"
+            return
+        if self._restore_failed:
+            # Latched until a manual UP0 confirmation re-arms the reference.
+            self.reference_state=self._restore_failed
             return
         if not imu_data_valid:
             self._ref_q.clear()
@@ -190,9 +226,25 @@ class PoseMapper:
             self._ref_valid_t0=None
             return
         current=math.atan2(float(x[1]),float(x[0]))
-        self.R_board_from_fusion=Rz(self.reference_heading-current)
+        R_live=Rz(self.reference_heading-current)
+        if self._restore_pending and self._restore_R is not None:
+            dyaw=_wrap_deg(_yaw_deg(R_live)-_yaw_deg(self._restore_R))
+            if abs(dyaw)>self._restore_tol:
+                self._ref_q.clear()
+                self._ref_valid_t0=None
+                self._restore_pending=False
+                self._restore_failed=f"REJECTED_R0_MISMATCH({dyaw:+.0f}deg)"
+                self.reference_state=self._restore_failed
+                return
+            self.R_board_from_fusion=self._restore_R
+            self.reference_locked=True
+            self._restore_pending=False
+            self.reference_state="LOCKED_RESTORED"
+            return
+        self.R_board_from_fusion=R_live
         self.reference_locked=True
         self.reference_state="LOCKED"
+        self._persist_locked_reference()
 
     @staticmethod
     def _sample_key(f):
@@ -274,8 +326,12 @@ class PoseMapper:
         reboot=(self._last_sample_us is not None and sample_us>0 and
                 sample_us<self._last_sample_us)
         if reboot:
-            self.disarm_reference()
-            self.reference_state="DEVICE_REBOOT_CONFIRM_UP0"
+            if self._restore_R is not None:
+                self.reset_reference()
+                self.reference_state="DEVICE_REBOOT_WAITING_UP0"
+            else:
+                self.disarm_reference()
+                self.reference_state="DEVICE_REBOOT_CONFIRM_UP0"
         dt_ms=None if self._last_host_ns is None else (now_ns-self._last_host_ns)/1e6
         frame_gap=(None if self._last_frame_id is None or fid<0 else
                    (fid-self._last_frame_id-1)&0xFFFFFFFF)
@@ -320,6 +376,8 @@ class PoseMapper:
             "tilt_from_vertical_deg":tilt,
             "pose_quality":quality,"frame_gap":frame_gap,"host_dt_ms":dt_ms,
             "stale":stale,"device_reboot_detected":reboot,
+            "r_board_from_fusion":(self.R_board_from_fusion.tolist()
+                                   if self.R_board_from_fusion is not None else None),
         }
         if not self.reference_locked:
             self._last_pose=dict(out)

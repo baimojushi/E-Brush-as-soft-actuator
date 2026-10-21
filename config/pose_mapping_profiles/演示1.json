@@ -1,0 +1,102 @@
+{
+  "schema": "ebrush.pose_mapping.v3",
+  "name": "演示1",
+  "created_unix": 1792538638.4810734,
+  "parent": "随采演示",
+  "sensor_calibration": [
+    "20260924_165508_imu_calibration",
+    "20260930_173846_imu_reboot_supplement"
+  ],
+  "rigid_mount": {
+    "R_imu_from_brush": [
+      [
+        -0.03457856,
+        0.00435646,
+        -0.99939249
+      ],
+      [
+        0.99786617,
+        0.0555675,
+        -0.03428352
+      ],
+      [
+        0.05538439,
+        -0.99844543,
+        -0.00626861
+      ]
+    ]
+  },
+  "startup_reference": {
+    "method": "UP_R0",
+    "definition": {
+      "tip": "down_toward_paper",
+      "shaft": "vertical",
+      "tail": "up_away_from_paper",
+      "brush_plus_z": "tip_to_tail_same_as_board_plus_z",
+      "r0_index_mark": "toward_board_plus_x_writer_right",
+      "r0_verified_by": "manual_confirmation_not_six_axis_imu"
+    },
+    "heading_absolute": false,
+    "reference_state": "LOCKED"
+  },
+  "validation": {
+    "stand_stability": 1.0,
+    "pickup_detected": true,
+    "reference_state": "LOCKED",
+    "up_r0_tilt_deg": 5.240354910692172,
+    "up0_confirmation": {
+      "r0_mark_board_plus_x": true,
+      "verified_by": "human_operator",
+      "timestamp_unix": 1792538586.4793022,
+      "tilt_deg_at_confirmation": 4.654939595332566
+    },
+    "up_r0_locked": true,
+    "x_live": {
+      "tilt_x_deg": 15.307199282896132,
+      "tilt_y_deg": 9.714342157430735
+    },
+    "x_test": {
+      "pass": true,
+      "tilt_x_deg": 15.307199282896132,
+      "cross_y_deg": 9.714342157430735
+    },
+    "y_live": {
+      "tilt_x_deg": 18.01807348621168,
+      "tilt_y_deg": 34.52412605407275
+    },
+    "y_test": {
+      "pass": true,
+      "tilt_y_deg": 34.52412605407275,
+      "cross_x_deg": 18.01807348621168
+    },
+    "roll_live_delta_deg": 48.66709593550698,
+    "roll_test": {
+      "relative_pass": true,
+      "delta_deg": 48.66709593550698,
+      "absolute_verified": false
+    }
+  },
+  "quality_score": 100,
+  "mapper_override": {
+    "schema": "ebrush.mapper_debug.v1",
+    "board_xyz_deg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "brush_xyz_deg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "active_version": "随采演示",
+    "formula": "R_board_debug @ R_mapper @ R_brush_debug",
+    "name": "演示1",
+    "saved_unix": 1792538638.4805198
+  },
+  "limitations": {
+    "absolute_heading": false,
+    "absolute_roll": "UNVERIFIED",
+    "r0_direction": "USER_CONFIRMED"
+  }
+}

@@ -332,6 +332,10 @@ class PoseCalibrationSession:
                 "definition": UP0_DEFINITION,
                 "heading_absolute": False,
                 "reference_state": self.results.get("reference_state"),
+                # Persisted so a restart can re-adopt R0 without a manual confirm.
+                "R_board_from_fusion": (
+                    np.asarray(self.pose.R_board_from_fusion).tolist()
+                    if self.pose.R_board_from_fusion is not None else None),
             },
             "validation": self.results, "quality_score": self.quality(),
             "mapper_override": mv,

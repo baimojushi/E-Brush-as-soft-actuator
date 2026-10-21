@@ -113,15 +113,31 @@ class Scene3D(QtWidgets.QWidget):
         self.euler_info = QtWidgets.QLabel("IMU 姿态：Roll=0.0° Pitch=0.0° Yaw=0.0°")
         self.euler_info.setStyleSheet("font-family: monospace; font-size: 12px; color: #e0e0e0; background: rgba(0,0,0,150); padding: 6px;")
         self.euler_info.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        self.euler_info.setWordWrap(True)
         # Add as overlay widget (will be positioned in resizeEvent)
         self.euler_info.setParent(self.view)
         self.euler_info.move(10, 10)
         self.euler_info.show()
+        self.view.installEventFilter(self)
+        self._size_overlay()
         
         self.pc=gl.GLScatterPlotItem(size=1.5,pxMode=True); self.view.addItem(self.pc)
-        self.info=QtWidgets.QLabel("三维场景：等待数据"); L.addWidget(self.info)
+        self.info=QtWidgets.QLabel("三维场景：等待数据")
+        self.info.setWordWrap(True)
+        self.info.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        L.addWidget(self.info)
         self.show_pc=True
         self.world_anchor=np.array([-220.0,-220.0,90.0],float)
+
+    def _size_overlay(self):
+        self.euler_info.setMaximumWidth(max(100, min(320, self.view.width()-20)))
+        self.euler_info.adjustSize()
+        self.euler_info.move(10, 10)
+
+    def eventFilter(self, obj, event):
+        if obj is self.view and event.type() == QtCore.QEvent.Resize:
+            self._size_overlay()
+        return super().eventFilter(obj, event)
 
     def _draw_pointcloud(self, camera):
         if not self.show_pc or camera is None or camera.get("pointcloud") is None:

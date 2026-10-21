@@ -37,21 +37,34 @@ class FluxPreview(QtWidgets.QWidget):
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         p.fillRect(self.rect(), QtGui.QColor(18,22,28))
         w,h=self.width(),self.height()
-        lx0=18; lx1=w*0.48; cx=(lx0+lx1)/2; bw=(lx1-lx0)*0.84
+        # At tablet/tiled widths, put the three vector bars ABOVE the
+        # world-flux plot instead of compressing both into 200 px columns.
+        stacked = w < 560
+        if stacked:
+            lx0, lx1 = 18, w - 18
+            left_bottom = h * 0.49
+            ys = [left_bottom * 0.26, left_bottom * 0.53, left_bottom * 0.80]
+            rx0, rx1 = 18, w - 18
+            ry0, ry1 = left_bottom + 22, h - 18
+        else:
+            lx0, lx1 = 18, w * 0.48
+            ys = [h * 0.24, h * 0.50, h * 0.76]
+            rx0, rx1 = w * 0.52, w - 18
+            ry0, ry1 = 18, h - 18
+        cx=(lx0+lx1)/2; bw=(lx1-lx0)*0.84
         if self.data and self.data.get("present"):
             bc=self.data.get("brush_components_mT",{})
             vals=[float(bc.get("x",0)), float(bc.get("y",0)), float(bc.get("z",0))]
             vmax=max(0.05, max(abs(v) for v in vals))
-            ys=[h*0.24, h*0.50, h*0.76]
             cols=[QtGui.QColor(255,90,90), QtGui.QColor(85,230,120), QtGui.QColor(90,145,255)]
             labs=["Brush X","Brush Y","Brush Z"]
             for y,v,c,l in zip(ys,vals,cols,labs):
                 self._draw_centered_component(p,cx,y,bw,l,v,vmax,c)
         else:
             p.setPen(QtGui.QPen(QtGui.QColor(180,190,205),1))
-            p.drawText(QtCore.QRectF(0,0,lx1,h), QtCore.Qt.AlignCenter, "无霍尔数据")
+            p.drawText(QtCore.QRectF(0,0,lx1,left_bottom if stacked else h),
+                       QtCore.Qt.AlignCenter, "无霍尔数据")
 
-        rx0=w*0.52; rx1=w-18; ry0=18; ry1=h-18
         p.setPen(QtGui.QPen(QtGui.QColor(70,80,95),1))
         p.drawRect(QtCore.QRectF(rx0,ry0,rx1-rx0,ry1-ry0))
         p.setPen(QtGui.QPen(QtGui.QColor(190,200,215),1))
@@ -91,9 +104,12 @@ class HallPanel(QtWidgets.QWidget):
         super().__init__()
         L=QtWidgets.QVBoxLayout(self)
         title=QtWidgets.QLabel("霍尔三轴 / 磁通可视化")
-        title.setStyleSheet("font-size:20px;font-weight:600")
+        title.setStyleSheet("font-size:19px;font-weight:600")
+        title.setWordWrap(True)
         self.preview=FluxPreview()
         self.form=QtWidgets.QFormLayout()
+        self.form.setRowWrapPolicy(QtWidgets.QFormLayout.WrapLongRows)
+        self.form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
         self.labels={}
         for key,label in [
             ("sensor_xyz","Sensor B (mT)"),("brush_xyz","Brush B (mT)"),("world_xyz","World B instant (mT)"),
@@ -101,14 +117,28 @@ class HallPanel(QtWidgets.QWidget):
             ("method","Mount / solve"),("note","说明")
         ]:
             q=QtWidgets.QLabel("—"); q.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+            q.setWordWrap(True)
+            q.setMinimumWidth(0)
             self.labels[key]=q; self.form.addRow(label,q)
         self.detail=QtWidgets.QPlainTextEdit(); self.detail.setReadOnly(True)
         L.addWidget(title); L.addWidget(self.preview); L.addLayout(self.form); L.addWidget(self.detail)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # A stacked FluxPreview needs vertical room; it must not draw two
+        # graphs on top of each other in a squeezed two-column grid.
+        minimum = 400 if self.width() - 20 < 560 else 260
+        if self.preview.minimumHeight() != minimum:
+            self.preview.setMinimumHeight(minimum)
 
     def update_data(self, d):
         self.preview.set_data(d)
         if not d or not d.get("present"):
             msg="未检测到霍尔三轴数据"
+            if d and d.get('reason') == 'unknown_hall_variant_or_invalid_mT':
+                msg = (f"已收到 Hall 原始码 {d.get('hall_raw_xyz')}，"
+                       f"但 Hall variant={d.get('hall_variant')} 未知，"
+                       "等待 S3 HELLO/HEALTH 元数据，暂不计算 mT")
             for q in self.labels.values(): q.setText("—")
             self.labels["note"].setText(msg)
             self.detail.setPlainText(msg)
@@ -124,6 +154,7 @@ class HallPanel(QtWidgets.QWidget):
         self.labels["method"].setText(str(d.get("method","")))
         rt=d.get("runtime_mapping",{})
         self.labels["note"].setText(
-            "警告："+str(rt.get("warning")) if not rt.get("compatible",True) else
-            "局部三轴为瞬时量；整体云图采用世界坐标表示，并假设外部磁场近似恒定。")
+            "警告：Hall 数据标志无效或过期" if not d.get('hall_valid', True) else
+            ("警告："+str(rt.get("warning")) if not rt.get("compatible",True) else
+             "局部三轴为瞬时量；整体云图采用世界坐标表示，并假设外部磁场近似恒定。"))
         self.detail.setPlainText(json.dumps(d,ensure_ascii=False,indent=2))

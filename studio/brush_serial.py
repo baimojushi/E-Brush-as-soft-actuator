@@ -348,10 +348,15 @@ class BrushSerial:
         self.sync_period_s = sync_period_s
         self.ser = serial.Serial(port, baudrate=baud, timeout=0, write_timeout=0.05)
         self.clock = ClockDiscipline()
-        self.frames: "queue.Queue[dict]" = queue.Queue(maxsize=queue_size)
+        # queue_size=0 is latest-only mode (Studio GUI does not call drain()).
+        # Avoid false host_queue_drop alarms and wasted queue churn at 200 Hz.
+        self.frames: Optional["queue.Queue[dict]"] = (
+            queue.Queue(maxsize=queue_size) if queue_size > 0 else None)
         self.latest: Optional[dict] = None
         self.latest_hello: Optional[dict] = None
         self.latest_health: Optional[dict] = None
+        self.last_protocol_error = ""
+        self.last_io_error = ""
 
         self.stats = collections.Counter()
         self._packet_seq_out = 0
@@ -417,12 +422,18 @@ class BrushSerial:
             try:
                 n = self.ser.in_waiting
                 data = self.ser.read(n if n > 0 else 1)
-            except Exception:
+            except Exception as exc:
                 self.stats["serial_read_error"] += 1
-                time.sleep(0.05)
-                continue
+                self.last_io_error = f"{type(exc).__name__}: {exc}"
+                self._running = False
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                break
 
             if data:
+                self.stats["serial_rx_bytes"] += len(data)
                 self._rx_buf.extend(data)
                 self._consume_rx()
 
@@ -579,7 +590,16 @@ class BrushSerial:
                 self.stats["health_unknown_size"] += 1
             return
         if ptype == PT_DATA:
+            if len(payload) != DATA.size:
+                self.stats["data_bad_size"] += 1
+                self.stats[f"data_plen_{len(payload)}"] += 1
+                self.last_protocol_error = (
+                    f"DATA payload length mismatch: device={len(payload)}, "
+                    f"Studio={DATA.size}; check flashed firmware protocol")
+                return
             vals = DATA.unpack(payload)
+            self.last_protocol_error = ""
+            self.stats["data_frames"] += 1
             frame = self._decode_data(vals, host_rx_ns)
 
             fid = frame["frame_id"]
@@ -590,15 +610,16 @@ class BrushSerial:
             self._last_frame_id = fid
 
             self.latest = frame
-            try:
-                self.frames.put_nowait(frame)
-            except queue.Full:
-                self.stats["host_queue_drop"] += 1
+            if self.frames is not None:
                 try:
-                    self.frames.get_nowait()
                     self.frames.put_nowait(frame)
-                except Exception:
-                    pass
+                except queue.Full:
+                    self.stats["host_queue_drop"] += 1
+                    try:
+                        self.frames.get_nowait()
+                        self.frames.put_nowait(frame)
+                    except Exception:
+                        pass
 
     def _decode_data(self, v: Tuple, host_rx_ns: int) -> dict:
         (
@@ -675,6 +696,8 @@ class BrushSerial:
         }
 
     def drain(self, limit: int = 1000) -> List[dict]:
+        if self.frames is None:
+            return []
         out = []
         for _ in range(limit):
             try:

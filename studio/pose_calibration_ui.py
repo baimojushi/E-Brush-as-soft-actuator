@@ -17,9 +17,11 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         super().__init__()
         layout = QtWidgets.QVBoxLayout(self)
         self.title = QtWidgets.QLabel("姿态映射校准 · UP0 / UP_R0")
-        self.title.setStyleSheet("font-size:20px;font-weight:600")
+        self.title.setStyleSheet("font-size:19px;font-weight:600")
+        self.title.setWordWrap(True)
         self.stage = QtWidgets.QLabel("IDLE")
-        self.stage.setStyleSheet("font-size:26px;font-weight:700")
+        self.stage.setStyleSheet("font-size:22px;font-weight:700")
+        self.stage.setWordWrap(True)
         self.msg = QtWidgets.QLabel("准备就绪")
         self.msg.setWordWrap(True)
 
@@ -34,7 +36,12 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         self.progress = QtWidgets.QProgressBar()
         self.progress.setRange(0, 100)
 
-        row = QtWidgets.QHBoxLayout()
+        # Long action labels previously occupied a single 700+ px row,
+        # silently setting an unusably large minimum width on this pane.
+        # Keep every action but use a compact two-column control grid.
+        row = QtWidgets.QGridLayout()
+        row.setHorizontalSpacing(5)
+        row.setVerticalSpacing(5)
         self.start_button = QtWidgets.QPushButton("开始校准")
         self.start_button.clicked.connect(self.startRequested.emit)
         self.up0_button = QtWidgets.QPushButton("确认 R0 朝 +X，开始采集 UP0")
@@ -45,33 +52,47 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         self.retry_button.clicked.connect(self.retryRequested.emit)
         self.cancel_button = QtWidgets.QPushButton("取消校准")
         self.cancel_button.clicked.connect(self.cancelRequested.emit)
+        self.up0_button.setText("确认 R0 朝 +X，采集 UP0")
+        self.next_button.setText("下一步（自动验证）")
         for b in (self.start_button, self.up0_button, self.next_button,
                   self.retry_button, self.cancel_button):
-            row.addWidget(b)
+            b.setMinimumWidth(0)
+        row.addWidget(self.start_button, 0, 0)
+        row.addWidget(self.retry_button, 0, 1)
+        row.addWidget(self.up0_button, 1, 0, 1, 2)
+        row.addWidget(self.next_button, 2, 0)
+        row.addWidget(self.cancel_button, 2, 1)
+        row.setColumnStretch(0, 1)
+        row.setColumnStretch(1, 1)
 
-        save = QtWidgets.QHBoxLayout()
+        save = QtWidgets.QGridLayout()
         self.name = QtWidgets.QLineEdit()
         self.name.setPlaceholderText("映射配置名称")
         self.commit = QtWidgets.QPushButton("验证通过后保存")
         self.commit.clicked.connect(lambda: self.commitRequested.emit(self.name.text().strip()))
-        save.addWidget(self.name)
-        save.addWidget(self.commit)
+        save.addWidget(self.name, 0, 0)
+        save.addWidget(self.commit, 0, 1)
+        save.setColumnStretch(0, 2)
+        save.setColumnStretch(1, 1)
 
-        versions = QtWidgets.QHBoxLayout()
+        versions = QtWidgets.QGridLayout()
         self.profiles = QtWidgets.QComboBox()
         self.load = QtWidgets.QPushButton("加载 / 回退")
         self.load.clicked.connect(lambda: self.loadRequested.emit(self.profiles.currentText()))
-        versions.addWidget(self.profiles)
-        versions.addWidget(self.load)
+        versions.addWidget(self.profiles, 0, 0)
+        versions.addWidget(self.load, 0, 1)
+        versions.setColumnStretch(0, 2)
+        versions.setColumnStretch(1, 1)
 
         self.detail = QtWidgets.QPlainTextEdit()
         self.detail.setReadOnly(True)
+        self.detail.setMinimumHeight(100)
         for w in (self.title, self.definition, self.stage, self.msg, self.progress):
             layout.addWidget(w)
         layout.addLayout(row)
         layout.addLayout(save)
         layout.addLayout(versions)
-        layout.addWidget(self.detail)
+        layout.addWidget(self.detail, 1)
         self.update_state({"stage": "IDLE", "message": "Ready"})
 
     def set_profiles(self, items):

@@ -3,6 +3,32 @@ from collections import deque
 from pathlib import Path
 import numpy as np, cv2
 HERE=Path(__file__).resolve().parent;ROOT=HERE.parent;sys.path.insert(0,str(HERE))
+
+def _load_saved_reference(root):
+    """R0 saved at the last lock, else the last committed profile's copy."""
+    side = Path(root)/"runtime"/"last_up0_reference.json"
+    try:
+        if side.is_file():
+            R=np.asarray(json.loads(side.read_text(encoding="utf-8"))["R_board_from_fusion"],float)
+            if R.shape==(3,3):
+                return R
+    except Exception:
+        pass
+    try:
+        active=json.loads((Path(root)/"config"/"pose_mapping_profile_active.json")
+                          .read_text(encoding="utf-8"))
+        prof_path=Path(active.get("path") or "")
+        if not prof_path.is_file():
+            return None
+        prof=json.loads(prof_path.read_text(encoding="utf-8"))
+        R=prof.get("startup_reference",{}).get("R_board_from_fusion")
+        if R is None:
+            return None
+        R=np.asarray(R,float)
+        return R if R.shape==(3,3) else None
+    except Exception:
+        return None
+
 from sources import HP60CSource,BrushSource
 from pose_mapper import PoseMapper
 from core import HotPatch
@@ -17,6 +43,7 @@ from hall_mount import HallMountModel
 from hall_panel import HallPanel
 from hall_extrinsic import HallExtrinsicCalibration
 from hall_extrinsic_ui import HallExtrinsicPanel
+from responsive_workspace import ResponsiveWorkspace
 from PySide6 import QtCore,QtWidgets,QtGui
 import pyqtgraph as pg
 
@@ -130,7 +157,10 @@ def overlay(rgb,mask=None,axis_text=None):
 class ValidationPanel(QtWidgets.QWidget):
     def __init__(self):
         super().__init__();L=QtWidgets.QVBoxLayout(self)
-        self.big=QtWidgets.QLabel("SAM3 waiting…");self.big.setStyleSheet("font-size:22px;font-weight:700");L.addWidget(self.big)
+        self.big=QtWidgets.QLabel("SAM3 waiting…");self.big.setStyleSheet("font-size:19px;font-weight:700")
+        self.big.setWordWrap(True)
+        self.big.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        L.addWidget(self.big)
         self.detail=QtWidgets.QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMaximumHeight(330);L.addWidget(self.detail)
         self.plot=pg.PlotWidget(title="IMU ↔ Vision shaft error");self.plot.setLabel("left","deg");self.plot.setLabel("bottom","samples")
         self.curve=self.plot.plot();self.err=deque(maxlen=600);L.addWidget(self.plot)
@@ -152,7 +182,7 @@ class ColormapControlPanel(QtWidgets.QWidget):
 
         # Title
         title = QtWidgets.QLabel("深度图色彩控制")
-        title.setStyleSheet("font-size:14px;font-weight:700;color:#222;")
+        title.setStyleSheet("font-size:14px;font-weight:700;color:#e5e7eb;")
         L.addWidget(title)
 
         # Colormap type
@@ -165,22 +195,22 @@ class ColormapControlPanel(QtWidgets.QWidget):
 
         # Mix
         self.sld_mix = self._make_slider("混合度", 0, 100, 100, "与灰度混合比例")
-        L.addWidget(self.sld_mix[0]); L.addWidget(self.sld_mix[1])
+        L.addWidget(self.sld_mix[0]); L.addLayout(self._slider_row(self.sld_mix))
 
         # Brightness
         self.sld_bright = self._make_slider("亮度", -100, 100, 0, "亮度偏移")
-        L.addWidget(self.sld_bright[0]); L.addWidget(self.sld_bright[1])
+        L.addWidget(self.sld_bright[0]); L.addLayout(self._slider_row(self.sld_bright))
 
         # Contrast
         self.sld_contrast = self._make_slider("对比度", 10, 300, 100, "对比度倍数")
-        L.addWidget(self.sld_contrast[0]); L.addWidget(self.sld_contrast[1])
+        L.addWidget(self.sld_contrast[0]); L.addLayout(self._slider_row(self.sld_contrast))
 
         # Depth range min/max
         self.sld_dmin = self._make_slider("深度范围Min", 0, 99, 0, "深度范围下限(%)")
         self.sld_dmax = self._make_slider("深度范围Max", 1, 100, 100, "深度范围上限(%)")
         L.addWidget(QtWidgets.QLabel("深度范围裁剪"))
-        L.addWidget(self.sld_dmin[0]); L.addWidget(self.sld_dmin[1])
-        L.addWidget(self.sld_dmax[0]); L.addWidget(self.sld_dmax[1])
+        L.addWidget(self.sld_dmin[0]); L.addLayout(self._slider_row(self.sld_dmin))
+        L.addWidget(self.sld_dmax[0]); L.addLayout(self._slider_row(self.sld_dmax))
 
         # Near/Far
         self.spn_near = QtWidgets.QSpinBox(); self.spn_near.setRange(0, 10000); self.spn_near.setValue(0); self.spn_near.setSuffix(" mm")
@@ -210,6 +240,14 @@ class ColormapControlPanel(QtWidgets.QWidget):
         val_lbl.setMinimumWidth(40)
         sld.valueChanged.connect(lambda v: (val_lbl.setText(str(v)), self._emit()))
         return lbl, sld, val_lbl
+
+    @staticmethod
+    def _slider_row(parts):
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(parts[1], 1)
+        row.addWidget(parts[2])
+        return row
 
     def _emit(self):
         if self.on_change:
@@ -241,27 +279,45 @@ class ColormapControlPanel(QtWidgets.QWidget):
 class Win(QtWidgets.QMainWindow):
     def __init__(self, a):
         super().__init__()
-        self.resize(1600, 960)
+        self._settings = QtCore.QSettings("E-Brush", "Studio")
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(min(1580, max(720, int(available.width() * 0.94))),
+                        min(960, max(550, int(available.height() * 0.90))))
+        else:
+            self.resize(1450, 850)
+        self.setMinimumSize(720, 520)
         self.setWindowTitle("e-Brush Studio v1.0 — 彩色/深度/SAM3/验证/三维/霍尔/姿态/外参")
 
         cfg = json.loads((ROOT/"config"/"vision_validation.json").read_text(encoding="utf-8"))
         self.cfg = cfg
 
         # Sources
-        self.hp = HP60CSource(ROOT, a.camera_backend)
+        self.hp = HP60CSource(ROOT, a.camera_backend,
+                              auto_reconnect=a.camera_reconnect,
+                              auto_start_supervisor=a.camera_supervisor)
         self.hp.start()
         self.br = BrushSource(ROOT.parent, a.port, a.baud)
         if not a.no_brush:
             self.br.start()
 
         # Core pipelines
-        self.pose = PoseMapper(ROOT/"config"/"ebrush_pose_calibration.json", heading_mode=a.heading_mode, reference_enabled=False)
+        saved_r0 = _load_saved_reference(ROOT) if a.auto_restore_reference else None
+        self.pose = PoseMapper(
+            ROOT/"config"/"ebrush_pose_calibration.json",
+            heading_mode=a.heading_mode,
+            reference_enabled=saved_r0 is not None,
+            restore_reference=saved_r0,
+            auto_restore_tolerance_deg=a.auto_restore_tolerance_deg,
+            persist_reference_path=ROOT/"runtime"/"last_up0_reference.json")
         self.mapper_debug = MapperDebug(ROOT)
         self.pose_cal = PoseCalibrationSession(ROOT, self.pose, self.mapper_debug)
         self.hall = HallMountModel(ROOT)
         self.hall_cal = HallExtrinsicCalibration(ROOT, self.hall, self.pose, self.mapper_debug)
         self.patch = HotPatch(ROOT/"patches"/"visual_patch.py")
         self.state = {"camera": None, "brush": None, "pose": None, "hall": None}
+        self._last_display_token = None
 
         # SAM3
         sc = cfg["sam3"]
@@ -316,54 +372,25 @@ class Win(QtWidgets.QMainWindow):
             ("姿态映射校准", self.calui),
             ("霍尔外参标定", self.hallcalui),
         ]
-        self._view_visible = [True] * len(self._views)  # all visible by default
-
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
         main_layout.setContentsMargins(4, 4, 4, 4)
         main_layout.setSpacing(4)
 
-        # Top toolbar: view toggles
-        toolbar = QtWidgets.QWidget()
-        tb_layout = QtWidgets.QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(4, 4, 4, 4)
-        tb_layout.setSpacing(6)
-
-        self._toggle_buttons = []
-        for i, (name, _) in enumerate(self._views):
-            btn = QtWidgets.QToolButton()
-            btn.setText(name)
-            btn.setCheckable(True)
-            btn.setChecked(True)
-            btn.setMinimumWidth(100)
-            btn.setMinimumHeight(32)
-            btn.setStyleSheet("""
-                QToolButton { background:#333; color:#fff; border:1px solid #555; border-radius:4px; padding:4px 8px; font-weight:600; }
-                QToolButton:checked { background:#0078d4; border-color:#0078d4; }
-                QToolButton:hover:!checked { background:#444; }
-            """)
-            btn.toggled.connect(lambda checked, idx=i: self._on_view_toggled(idx, checked))
-            tb_layout.addWidget(btn)
-            self._toggle_buttons.append(btn)
-
-        tb_layout.addStretch()
-        main_layout.addWidget(toolbar)
-
-        # Grid container for views
-        self._grid_container = QtWidgets.QWidget()
-        self._grid_layout = QtWidgets.QGridLayout(self._grid_container)
-        self._grid_layout.setContentsMargins(4, 4, 4, 4)
-        self._grid_layout.setSpacing(6)
-        self._group_boxes = []  # track group boxes for proper cleanup
-        main_layout.addWidget(self._grid_container, 1)
-
-        # Initialize grid
-        self._rebuild_grid()
+        # A width-aware workspace replaces the old fixed three-column grid.
+        # Persistent views keep their camera, OpenGL and calibration state.
+        self.workspace = ResponsiveWorkspace(self._views)
+        self.workspace.sidebarToggleRequested.connect(self._toggle_sidebars)
+        self.workspace.resetLayoutRequested.connect(self._reset_ui_layout)
+        main_layout.addWidget(self.workspace, 1)
 
         # ---- Docks ----
         # Right dock: Runtime + Colormap
-        d = QtWidgets.QDockWidget("Runtime / 色彩控制")
+        d = QtWidgets.QDockWidget("Runtime / 色彩控制", self)
+        d.setObjectName("dock_runtime_colormap")
+        d.setMinimumWidth(245)
+        self._runtime_dock = d
         w = QtWidgets.QWidget()
         f = QtWidgets.QVBoxLayout(w)
         f.setSpacing(8)
@@ -404,11 +431,21 @@ class Win(QtWidgets.QMainWindow):
 
         self.brush_status_lbl = QtWidgets.QLabel("状态: 检测中...")
         self.brush_status_lbl.setStyleSheet("font-size:12px;")
+        self.brush_status_lbl.setWordWrap(True)
         bl.addWidget(self.brush_status_lbl)
 
         self.brush_port_lbl = QtWidgets.QLabel("端口: 未连接")
         self.brush_port_lbl.setStyleSheet("font-size:12px; color:#888;")
+        self.brush_port_lbl.setWordWrap(True)
         bl.addWidget(self.brush_port_lbl)
+
+        # Raw channels must remain visible even before the UP0 pose reference locks.
+        self.brush_hall_lbl = QtWidgets.QLabel("Hall: 等待有效 DATA")
+        self.brush_imu_lbl = QtWidgets.QLabel("IMU: 等待有效 DATA")
+        for label in (self.brush_hall_lbl, self.brush_imu_lbl):
+            label.setWordWrap(True)
+            label.setStyleSheet("font-size:11px; color:#bbb;")
+            bl.addWidget(label)
 
         row = QtWidgets.QWidget()
         rh = QtWidgets.QHBoxLayout(row)
@@ -425,32 +462,54 @@ class Win(QtWidgets.QMainWindow):
 
         f.addWidget(self.brush_panel)
 
-        d.setWidget(w)
+        f.addStretch(1)
+        runtime_scroll = QtWidgets.QScrollArea()
+        runtime_scroll.setWidgetResizable(True)
+        runtime_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        runtime_scroll.setWidget(w)
+        d.setWidget(runtime_scroll)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, d)
 
-        # Left dock: Mapper debug
-        md = QtWidgets.QDockWidget("映射快捷调试")
+        # Left dock: a compact, scrollable mapping editor. The previous
+        # QFormLayout placed three large spinboxes beside a long label and
+        # forced this dock to steal half of the central viewport.
+        md = QtWidgets.QDockWidget("映射快捷调试", self)
+        md.setObjectName("dock_mapper_debug")
+        md.setMinimumWidth(245)
+        self._mapper_dock = md
         mw = QtWidgets.QWidget()
-        mf = QtWidgets.QFormLayout(mw)
+        mf = QtWidgets.QVBoxLayout(mw)
+        mf.setContentsMargins(8, 8, 8, 8)
+        mf.setSpacing(8)
         self.map_spins = []
         for group, label in (("board", "纸面坐标 XYZ °"), ("brush", "毛笔/安装 XYZ °")):
-            row = QtWidgets.QWidget()
-            hl = QtWidgets.QHBoxLayout(row)
-            hl.setContentsMargins(0, 0, 0, 0)
+            group_box = QtWidgets.QGroupBox(label)
+            group_layout = QtWidgets.QGridLayout(group_box)
+            group_layout.setContentsMargins(6, 8, 6, 6)
+            group_layout.setHorizontalSpacing(4)
+            arr = self.mapper_debug.board_deg if group == "board" else self.mapper_debug.brush_deg
             for i, axis in enumerate("XYZ"):
+                axis_label = QtWidgets.QLabel(axis)
+                axis_label.setAlignment(QtCore.Qt.AlignCenter)
+                group_layout.addWidget(axis_label, 0, i)
                 sp = QtWidgets.QDoubleSpinBox()
                 sp.setRange(-180, 180)
                 sp.setDecimals(2)
                 sp.setSingleStep(0.5)
-                arr = self.mapper_debug.board_deg if group == "board" else self.mapper_debug.brush_deg
+                sp.setMinimumWidth(0)
                 sp.setValue(float(arr[i]))
                 sp.valueChanged.connect(lambda v, g=group, i=i: self._mapper_spin(g, i, v))
-                hl.addWidget(QtWidgets.QLabel(axis))
-                hl.addWidget(sp)
+                group_layout.addWidget(sp, 1, i)
+                group_layout.setColumnStretch(i, 1)
                 self.map_spins.append((group, i, sp))
-            mf.addRow(label, row)
+            mf.addWidget(group_box)
+        mf.addWidget(QtWidgets.QLabel("版本名称"))
         self.map_name = QtWidgets.QLineEdit()
+        self.map_name.setPlaceholderText("例如：校准_01")
+        mf.addWidget(self.map_name)
+        mf.addWidget(QtWidgets.QLabel("历史版本"))
         self.map_versions = QtWidgets.QComboBox()
+        mf.addWidget(self.map_versions)
         self._refresh_versions()
         bs = QtWidgets.QPushButton("保存映射版本")
         bs.clicked.connect(self._save_mapping)
@@ -458,11 +517,17 @@ class Win(QtWidgets.QMainWindow):
         bl.clicked.connect(self._load_mapping)
         brs = QtWidgets.QPushButton("重置调试修正")
         brs.clicked.connect(self._reset_mapping)
-        mf.addRow("版本名称", self.map_name)
-        mf.addRow("历史版本", self.map_versions)
-        mf.addRow(bs); mf.addRow(bl); mf.addRow(brs)
-        md.setWidget(mw)
+        for btn in (bs, bl, brs):
+            mf.addWidget(btn)
+        mf.addStretch(1)
+        mapper_scroll = QtWidgets.QScrollArea()
+        mapper_scroll.setWidgetResizable(True)
+        mapper_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        mapper_scroll.setWidget(mw)
+        md.setWidget(mapper_scroll)
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, md)
+        d.visibilityChanged.connect(self._sync_sidebars_button)
+        md.visibilityChanged.connect(self._sync_sidebars_button)
 
         # Calibration panels connections
         self.calui.startRequested.connect(lambda: self._cal_ui_call(self.pose_cal.start))
@@ -483,59 +548,54 @@ class Win(QtWidgets.QMainWindow):
         self.hallcalui.loadRequested.connect(lambda name: self._hall_ui_call(self.hall_cal.load, name))
         self._refresh_hall_profiles()
 
+        # Restore the last chosen layout and dock positions after the docks
+        # have been registered with stable object names.
+        saved_geometry = self._settings.value("ui/geometry")
+        saved_docks = self._settings.value("ui/docks")
+        if saved_geometry is not None:
+            self.restoreGeometry(saved_geometry)
+        if saved_docks is not None:
+            self.restoreState(saved_docks)
+        saved_mode = self._settings.value("ui/layout_mode", "auto")
+        if saved_mode not in ("auto", "two", "one", "tabs"):
+            saved_mode = "auto"
+        self.workspace.set_layout_mode(saved_mode)
+        self._sync_sidebars_button()
+
         # Timer
         self.t = QtCore.QTimer()
         self.t.timeout.connect(self.tick)
         self.t.start(16)
 
-    # ---- Toggle Grid Methods ----
-    def _on_view_toggled(self, idx, checked):
-        self._view_visible[idx] = checked
-        self._rebuild_grid()
+    # ---- Responsive workspace & side docks ----
+    def _toggle_sidebars(self):
+        show = not (self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
+        self._runtime_dock.setVisible(show)
+        self._mapper_dock.setVisible(show)
+        self._sync_sidebars_button()
 
-    def _rebuild_grid(self):
-        # Clear grid: properly detach widgets to avoid C++ object deletion
-        for gb in self._group_boxes:
-            # Detach the view widget first to prevent C++ cascading delete
-            # Only detach direct child (the view widget), not all descendants
-            layout = gb.layout()
-            if layout:
-                for i in range(layout.count()):
-                    item = layout.itemAt(i)
-                    if item and item.widget():
-                        item.widget().setParent(None)
-            self._grid_layout.removeWidget(gb)
-            gb.setParent(None)
-            gb.deleteLater()
-        self._group_boxes.clear()
+    def _sync_sidebars_button(self, *_args):
+        if hasattr(self, "workspace"):
+            self.workspace.set_sidebar_visible(
+                self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
 
-        # Collect visible views
-        visible = [(name, widget) for i, (name, widget) in enumerate(self._views) if self._view_visible[i]]
-
-        if not visible:
-            return
-
-        n = len(visible)
-        n_cols = math.ceil(math.sqrt(n))
-        n_rows = math.ceil(n / n_cols)
-
-        for idx, (name, widget) in enumerate(visible):
-            row = idx // n_cols
-            col = idx % n_cols
-
-            # Create group box for each view
-            gb = QtWidgets.QGroupBox(name)
-            gb.setStyleSheet("""
-                QGroupBox { font-weight:600; font-size:12px; border:1px solid #444; border-radius:4px; margin-top:8px; padding-top:4px; }
-                QGroupBox::title { subcontrol-origin:margin; left:8px; padding:0 4px; color:#ccc; }
-            """)
-            vbox = QtWidgets.QVBoxLayout(gb)
-            vbox.setContentsMargins(2, 10, 2, 2)
-            vbox.setSpacing(0)
-            vbox.addWidget(widget)
-
-            self._grid_layout.addWidget(gb, row, col)
-            self._group_boxes.append(gb)
+    def _reset_ui_layout(self):
+        # Recover from a geometry/dock state saved on another monitor or DPI.
+        self._settings.remove("ui/geometry")
+        self._settings.remove("ui/docks")
+        self.workspace.set_layout_mode("auto")
+        for dock, area in ((self._mapper_dock, QtCore.Qt.LeftDockWidgetArea),
+                           (self._runtime_dock, QtCore.Qt.RightDockWidgetArea)):
+            dock.setFloating(False)
+            self.addDockWidget(area, dock)
+            dock.show()
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(min(1580, max(720, int(available.width() * 0.94))),
+                        min(960, max(550, int(available.height() * 0.90))))
+            self.move(available.center() - self.rect().center())
+        self._sync_sidebars_button()
 
     # ---- Colormap callback ----
     def _on_colormap_change(self):
@@ -544,22 +604,51 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- Brush serial reconnection callbacks ----
     def _update_brush_status(self):
-        if hasattr(self, 'br') and self.br:
-            s = self.br.status()
-            if s.get("connected"):
-                self.brush_status_lbl.setText("状态: 已连接 ✓")
-                self.brush_status_lbl.setStyleSheet("font-size:12px; color:#0a0;")
-                self.brush_port_lbl.setText(f"端口: {s.get('port', '未知')}")
+        if not getattr(self, 'br', None):
+            return
+        s = self.br.status()
+        connected = s.get('connected', False)
+        flowing = s.get('streaming_data', False)
+        if flowing:
+            self.brush_status_lbl.setText(
+                f"状态: 已收到合法 DATA ✓ ({s.get('valid_data_frames', 0)} 帧)")
+            color = '#0a0'
+        elif connected:
+            self.brush_status_lbl.setText('状态: 串口已打开，但尚无有效 DATA ⚠')
+            color = '#bb8100'
+        else:
+            self.brush_status_lbl.setText('状态: 未连接 ✗')
+            color = '#c00'
+        self.brush_status_lbl.setStyleSheet(f'font-size:12px; color:{color};')
+        self.brush_port_lbl.setText(f"端口: {s.get('port') or '未检测到'} | {s.get('decoder')}")
+        self.brush_port_lbl.setToolTip(
+            f"错误: {s.get('error') or 'none'}\n统计: {s.get('parser_stats', {})}")
+        self.chk_auto_reconnect.blockSignals(True)
+        self.chk_auto_reconnect.setChecked(bool(s.get('auto_reconnect')))
+        self.chk_auto_reconnect.blockSignals(False)
+
+        b = self.br.latest() if flowing else None
+        if b:
+            hall = (b.get('bx_mT'), b.get('by_mT'), b.get('bz_mT'))
+            if all(v is not None and math.isfinite(float(v)) for v in hall):
+                hv = ', '.join(f'{float(x):+.4f}' for x in hall) + ' mT'
             else:
-                self.brush_status_lbl.setText("状态: 未连接 ✗")
-                self.brush_status_lbl.setStyleSheet("font-size:12px; color:#c00;")
-                self.brush_port_lbl.setText(f"端口: {s.get('port', '未检测到')}")
-                if s.get("ever_connected"):
-                    self.brush_port_lbl.setText(self.brush_port_lbl.text() + " (曾连接)")
-            if s.get("auto_reconnect"):
-                self.chk_auto_reconnect.setChecked(True)
-            else:
-                self.chk_auto_reconnect.setChecked(False)
+                hv = ', '.join(str(b.get(k, '?')) for k in (
+                    'hall_x_raw', 'hall_y_raw', 'hall_z_raw')) + ' counts (等待 HELLO/variant)'
+            q = ', '.join(f'{float(b.get(k, 0)):+.3f}' for k in (
+                'q_w','q_x','q_y','q_z'))
+            valid = 'imu_valid' in b.get('device_status_names', [])
+            flags = '/'.join(b.get('device_status_names', []))
+            self.brush_hall_lbl.setText(f"Hall [{hv}] | frame {b.get('frame_id')}")
+            self.brush_imu_lbl.setText(
+                f"IMU ({'VALID' if valid else 'INVALID'}) q=[{q}]\n"
+                f"gyro_raw=[{b.get('gyro_x_raw')}, {b.get('gyro_y_raw')}, {b.get('gyro_z_raw')}]\n"
+                f"accel_raw=[{b.get('accel_x_raw')}, {b.get('accel_y_raw')}, {b.get('accel_z_raw')}]\n"
+                f"bits={flags}")
+        else:
+            msg = s.get('error') or ('没有新数据，检查端口/二进制协议/固件')
+            self.brush_hall_lbl.setText('Hall: ' + msg)
+            self.brush_imu_lbl.setText('IMU: 等待有效 BRUSH-V1 DATA 帧')
 
     def _manual_brush_reconnect(self):
         if hasattr(self, 'br') and self.br:
@@ -581,6 +670,7 @@ class Win(QtWidgets.QMainWindow):
         self.agent.register_command("reset_reference", lambda x: (self.pose.disarm_reference() or {"ok": True, "state": "WAITING_FOR_UP0_CONFIRMATION"}), "撤销参考；须重新确认 UP0")
         self.agent.register_command("calibration.confirm_up0", lambda a: self.pose_cal.confirm_up0(), "人工确认 R0 朝 +X 并开始采样")
         self.agent.register_command("sam3_health", lambda x: self.sam.health(), "SAM3 /health")
+        self.agent.register_command("camera.reconnect", lambda a: self.hp.reconnect_now(), "立即重连相机")
         self.agent.register_parameter("sam3.prompt", lambda: self.sam.prompt, lambda v: (setattr(self.sam, "prompt", str(v)) or self.sam.prompt), "SAM3 text prompt", "string")
         self.agent.register_parameter("sam3.clip_frames", lambda: self.sam.clip_frames, lambda v: (setattr(self.sam, "clip_frames", int(v)) or self.sam.clip_frames), "SAM3 clip frames", "int")
         self.agent.register_parameter("sam3.clip_fps", lambda: self.sam.clip_fps, lambda v: (setattr(self.sam, "clip_fps", int(v)) or self.sam.clip_fps), "SAM3 clip FPS", "int")
@@ -614,37 +704,46 @@ class Win(QtWidgets.QMainWindow):
         # Update brush serial status in UI
         self._update_brush_status()
 
-        c = self.hp.poll()
-        if c is not None:
-            self.state["camera"] = c
+        # A dead camera must not leave the last frame on screen as if live.
+        self.state["camera"] = self.hp.poll()
 
         b = self.br.latest()
-        if b:
+        live = bool(b and self.br.status().get('streaming_data'))
+        if live:
             self.state["brush"] = b
-            raw_pose = self.pose.map_frame(b)
-            # A GUI tick is NOT a fresh sensor sample. Do not let one serial
-            # frame count toward stillness, UP0, or Hall calibration repeatedly.
-            if raw_pose is not None and raw_pose.get("frame_fresh", True):
-                mapped_pose = self.mapper_debug.apply(raw_pose)
-                self.pose_cal.update(b, mapped_pose)
-                # Entering UP0 (or losing the reference) can disarm the mapper
-                # during this very tick; never show an old "locked" pose.
-                if not self.pose.reference_locked and mapped_pose.get("reference_locked"):
-                    mapped_pose = dict(raw_pose)
-                    mapped_pose.update({"reference_locked": False,
-                                        "reference_state": self.pose.reference_state})
-                    for k in list(mapped_pose):
-                        if k.startswith(("brush_axis_", "brush_x_axis_", "brush_y_axis_", "brush_q_",
-                                         "tilt_x_", "tilt_y_", "omega_")) or k in (
-                                "shaft_azimuth_deg", "heading_rel_deg", "roll_about_brush_rel_deg"):
-                            mapped_pose.pop(k, None)
-                self.state["pose"] = mapped_pose
-                self.state["hall"] = self.hall.process(b, mapped_pose)
-                self.hall_cal.update(b, mapped_pose)
-                if self.state["hall"] is not None:
-                    self.state["hall"]["runtime_mapping"] = self.hall_cal.runtime_mapping_status()
+            # GUI may tick at 60 Hz while sensor data is 200 Hz. A repeated
+            # frame is not a new Hall/IMU sample, even if rendered again.
+            token = (b.get('frame_id'), b.get('sample_time_us'), b.get('host_rx_ns'))
+            if token != self._last_display_token:
+                self._last_display_token = token
+                raw_pose = self.pose.map_frame(b)
+                mapped_pose = None
+                if raw_pose is not None and raw_pose.get('frame_fresh', True):
+                    mapped_pose = self.mapper_debug.apply(raw_pose)
+                    self.pose_cal.update(b, mapped_pose)
+                    if not self.pose.reference_locked and mapped_pose.get('reference_locked'):
+                        mapped_pose = dict(raw_pose)
+                        mapped_pose.update({"reference_locked": False,
+                                            "reference_state": self.pose.reference_state})
+                        for k in list(mapped_pose):
+                            if k.startswith(("brush_axis_", "brush_x_axis_", "brush_y_axis_", "brush_q_",
+                                             "tilt_x_", "tilt_y_", "omega_")) or k in (
+                                    "shaft_azimuth_deg", "heading_rel_deg", "roll_about_brush_rel_deg"):
+                                mapped_pose.pop(k, None)
+                self.state['pose'] = mapped_pose
+                # Hall sensor-frame readings are independent of IMU validity,
+                # quaternion quality, and UP0 reference state.
+                hall_pose = mapped_pose if mapped_pose and mapped_pose.get('imu_data_valid') else None
+                self.state['hall'] = self.hall.process(b, hall_pose)
+                if mapped_pose is not None:
+                    self.hall_cal.update(b, mapped_pose)
+                if self.state['hall'] is not None:
+                    self.state['hall']['runtime_mapping'] = self.hall_cal.runtime_mapping_status()
         else:
-            self.state["hall"] = None
+            self.state['brush'] = None
+            self.state['hall'] = None
+            self.state['pose'] = None
+            self._last_display_token = None
 
         self.calui.update_state(self.pose_cal.state())
         self.hallui.update_data(self.state.get("hall"))
@@ -711,10 +810,18 @@ class Win(QtWidgets.QMainWindow):
                 self.maskview.set(overlay(rgb_ctx, sr.mask, "SAM3 mask"))
 
         # Agent publish
+        transport = self.br.status()
+        sample = self.state.get('brush') or {}
         rs = {
             "camera": self.hp.status(),
             "brush_port": self.br.port,
-            "brush_error": self.br.error,
+            "brush_error": transport.get('error'),
+            "brush_data_valid": transport.get('streaming_data'),
+            "brush_data_frames": transport.get('valid_data_frames'),
+            "brush_parser_stats": transport.get('parser_stats'),
+            "brush_frame_id": sample.get('frame_id'),
+            "brush_status_flags": sample.get('device_status_names'),
+            "brush_quaternion_wxyz": [sample.get(k) for k in ('q_w','q_x','q_y','q_z')] if sample else None,
             "reference": self.pose.reference_state,
             "sam_last_frame": self.last_sam_result,
             "sam_prompt": self.sam.prompt,
@@ -722,7 +829,11 @@ class Win(QtWidgets.QMainWindow):
         }
         self.status.setPlainText(json.dumps(rs, ensure_ascii=False, indent=2))
         self.agent.publish("camera", rs["camera"])
-        self.agent.publish("brush", {"port": self.br.port, "error": self.br.error})
+        self.agent.publish("brush", {"port": self.br.port, "error": transport.get('error'),
+                                      "streaming_data": transport.get('streaming_data'),
+                                      "valid_data_frames": transport.get('valid_data_frames'),
+                                      "frame_id": sample.get('frame_id'),
+                                      "device_status_names": sample.get('device_status_names')})
         self.agent.publish("pose", self.state.get("pose") or {"reference_state": self.pose.reference_state, "reference_locked": False})
         srn = self.sam.latest()
         self.agent.publish("sam3", {"last_frame": self.last_sam_result, "prompt": self.sam.prompt, "last_error": getattr(srn, "error", "") if srn else "waiting", "latency_ms": getattr(srn, "latency_ms", None) if srn else None, "score": getattr(srn, "score", None) if srn else None})
@@ -839,6 +950,9 @@ class Win(QtWidgets.QMainWindow):
             self.status.setPlainText("SAM3 health ERROR: " + repr(e))
 
     def closeEvent(self, e):
+        self._settings.setValue("ui/geometry", self.saveGeometry())
+        self._settings.setValue("ui/docks", self.saveState())
+        self._settings.setValue("ui/layout_mode", self.workspace.mode)
         self.agent.close()
         self.sam.close()
         self.hp.close()
@@ -849,9 +963,17 @@ class Win(QtWidgets.QMainWindow):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--camera-backend", choices=["direct", "shm", "none"], default="shm")
+    p.add_argument("--camera-reconnect", action=argparse.BooleanOptionalAction, default=True,
+                   help="Keep retrying the HP60C camera in the background after a failure")
+    p.add_argument("--camera-supervisor", action=argparse.BooleanOptionalAction, default=True,
+                   help="Start the HP60C v13 supervisor when its shared memory is missing")
     p.add_argument("--port")
     p.add_argument("--baud", type=int, default=921600)
     p.add_argument("--heading-mode", choices=["startup_reference", "relative", "calibration_session"], default="startup_reference")
+    p.add_argument("--auto-restore-reference", action=argparse.BooleanOptionalAction, default=True,
+                   help="Adopt the last committed R0 on startup once the live upright pose agrees")
+    p.add_argument("--auto-restore-tolerance-deg", type=float, default=30.0,
+                   help="Max yaw difference between saved R0 and live UP0 before refusing the restore")
     p.add_argument("--no-brush", action="store_true")
     p.add_argument("--sam3-url")
     p.add_argument("--sam3-prompt")
