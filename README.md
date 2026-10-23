@@ -147,3 +147,13 @@ suitable for every antenna and operating range; tune after measurements.
 See `docs/PROTOCOL.md`. All radio packets have application CRC16, a packet
 sequence number, sample count and C3 timestamps. S3 validates before acting
 on any data; lost samples are flagged, never silently interpolated.
+
+
+## SAM3 6015 Studio Production Loop (2026-10)
+
+The actual Studio GUI now integrates bounded live single-frame semantic masks,
+complete-video chunked SAM3 upload, all-frame mask archives, resumable jobs,
+and Agent-readable diagnostics and artifact download.
+
+See **[docs/SAM3_STUDIO_PRODUCTION.md](docs/SAM3_STUDIO_PRODUCTION.md)** for
+connection, operation, data contracts, recovery and test limitations.

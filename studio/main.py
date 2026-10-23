@@ -32,7 +32,9 @@ def _load_saved_reference(root):
 from sources import HP60CSource,BrushSource
 from pose_mapper import PoseMapper
 from core import HotPatch
-from sam3_client import SAM3Client
+from sam3_client import SAM3Client, composite_overlay
+from sam3_video_jobs import VideoJobManager
+from sam3_production_panel import SAM3ProductionPanel
 from vision_pose import VisionPoseEstimator,compare_axes
 from agent_control import AgentControl
 from mapper_debug import MapperDebug
@@ -327,7 +329,9 @@ class Win(QtWidgets.QMainWindow):
             a.sam3_prompt or sc["prompt"],
             sc["jpeg_quality"], sc["timeout_s"],
             sc.get("clip_frames", 30), sc.get("clip_fps", 30),
-            sc["min_interval_s"]
+            sc.get("min_interval_s", 1.0),
+            runtime_dir=ROOT / "runtime" / "sam3_production",
+            max_frame_pixels=sc.get("max_frame_pixels", 307200),
         )
 
         # Vision
@@ -338,10 +342,20 @@ class Win(QtWidgets.QMainWindow):
 
         self.last_submitted = -1
         self.last_sam_result = -1
+        self.last_sam_sequence = 0
+        self._video_preview_active = False
         self.last_validation = None
 
         # Agent
         self.agent = AgentControl(ROOT/"runtime", a.agent_host, a.agent_port)
+        self.sam.set_event_sink(self.agent.event)
+        self.video_jobs = VideoJobManager(
+            ROOT / "runtime", self.sam.transport,
+            chunk_frames=sc.get("video_chunk_frames", 50),
+            max_frame_pixels=sc.get("max_frame_pixels", 307200),
+            event_sink=self.agent.event,
+        )
+        self.agent.register_artifact_provider(self.video_jobs)
         self._register_agent_commands()
         self.agent.start()
         self._last_agent_flush = 0
@@ -526,8 +540,22 @@ class Win(QtWidgets.QMainWindow):
         mapper_scroll.setWidget(mw)
         md.setWidget(mapper_scroll)
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, md)
+
+        # One full-video job manager is shared by the UI and the Agent API.
+        # Upload/download/ZIP work never runs on the Qt event loop.
+        vd = QtWidgets.QDockWidget("SAM3 视频上传 / 完整掩码", self)
+        vd.setObjectName("dock_sam3_production")
+        self._video_dock = vd
+        self.video_panel = SAM3ProductionPanel(
+            self.video_jobs, self.sam,
+            self._show_video_preview, self._return_live_overlay)
+        vd.setWidget(self.video_panel)
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, vd)
+        self.tabifyDockWidget(d, vd)
+        d.raise_()
         d.visibilityChanged.connect(self._sync_sidebars_button)
         md.visibilityChanged.connect(self._sync_sidebars_button)
+        vd.visibilityChanged.connect(self._sync_sidebars_button)
 
         # Calibration panels connections
         self.calui.startRequested.connect(lambda: self._cal_ui_call(self.pose_cal.start))
@@ -569,15 +597,17 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- Responsive workspace & side docks ----
     def _toggle_sidebars(self):
-        show = not (self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
-        self._runtime_dock.setVisible(show)
-        self._mapper_dock.setVisible(show)
+        show = not (self._runtime_dock.isVisible() or self._mapper_dock.isVisible()
+                    or self._video_dock.isVisible())
+        for dock in (self._runtime_dock, self._mapper_dock, self._video_dock):
+            dock.setVisible(show)
         self._sync_sidebars_button()
 
     def _sync_sidebars_button(self, *_args):
         if hasattr(self, "workspace"):
             self.workspace.set_sidebar_visible(
-                self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
+                self._runtime_dock.isVisible() or self._mapper_dock.isVisible()
+                or self._video_dock.isVisible())
 
     def _reset_ui_layout(self):
         # Recover from a geometry/dock state saved on another monitor or DPI.
@@ -585,7 +615,8 @@ class Win(QtWidgets.QMainWindow):
         self._settings.remove("ui/docks")
         self.workspace.set_layout_mode("auto")
         for dock, area in ((self._mapper_dock, QtCore.Qt.LeftDockWidgetArea),
-                           (self._runtime_dock, QtCore.Qt.RightDockWidgetArea)):
+                           (self._runtime_dock, QtCore.Qt.RightDockWidgetArea),
+                           (self._video_dock, QtCore.Qt.RightDockWidgetArea)):
             dock.setFloating(False)
             self.addDockWidget(area, dock)
             dock.show()
@@ -665,11 +696,38 @@ class Win(QtWidgets.QMainWindow):
             else:
                 self.br._stop_reconnect = True
 
+    # ---- Full-video results / Studio overlay ----
+    def _show_video_preview(self, rgb):
+        self._video_preview_active = True
+        self.maskview.set(rgb)
+
+    def _return_live_overlay(self):
+        self._video_preview_active = False
+        result = self.sam.latest()
+        if result and result.camera_context:
+            rgb = result.camera_context.get("rgb")
+            if rgb is not None:
+                self.maskview.set(composite_overlay(
+                    rgb, result.masks,
+                    f"SAM3 keyframe {result.frame_id} / {result.frame_status}"))
+
     # ---- Agent commands ----
     def _register_agent_commands(self):
         self.agent.register_command("reset_reference", lambda x: (self.pose.disarm_reference() or {"ok": True, "state": "WAITING_FOR_UP0_CONFIRMATION"}), "撤销参考；须重新确认 UP0")
         self.agent.register_command("calibration.confirm_up0", lambda a: self.pose_cal.confirm_up0(), "人工确认 R0 朝 +X 并开始采样")
-        self.agent.register_command("sam3_health", lambda x: self.sam.health(), "SAM3 /health")
+        self.agent.register_command("sam3_health", lambda x: self.sam.health(), "SAM3 /health/ready")
+        self.agent.register_command("sam3.capabilities", lambda a: self.sam.transport.capabilities(), "Query the actual SAM3 server mode/capability contract")
+        self.agent.register_command("sam3.live.status", lambda x: self.sam.status(), "SAM3 live keyframe queue/latency/failure counters")
+        self.agent.register_command("sam3.live.enable", lambda a: self.sam.set_enabled(bool(a.get("enabled", True))), "Enable or pause SAM3 live admission")
+        self.agent.register_command("sam3.live.clear_error", lambda a: self.sam.reset_error(), "Acknowledge live error without touching model state")
+        self.agent.register_command("sam3.video.submit", lambda a: self.video_jobs.enqueue(
+            a["path"], a.get("prompt", self.sam.prompt), a.get("frame_manifest_path")),
+            "Queue a complete video, optional frame_manifest_path for camera identity")
+        self.agent.register_command("sam3.video.retry", lambda a: self.video_jobs.retry(a["job_id"]), "Resume a failed/interrupted video job using saved chunks")
+        self.agent.register_command("sam3.video.status", lambda a: self.video_jobs.status(a.get("job_id")), "Video queue and detailed progress")
+        self.agent.register_command("sam3.video.jobs", lambda a: self.video_jobs.jobs(), "List completed/running/failed video jobs")
+        self.agent.register_command("sam3.video.pause", lambda a: self.video_jobs.pause(), "Pause video uploads after current chunk")
+        self.agent.register_command("sam3.video.resume", lambda a: self.video_jobs.resume(), "Resume video upload queue")
         self.agent.register_command("camera.reconnect", lambda a: self.hp.reconnect_now(), "立即重连相机")
         self.agent.register_parameter("sam3.prompt", lambda: self.sam.prompt, lambda v: (setattr(self.sam, "prompt", str(v)) or self.sam.prompt), "SAM3 text prompt", "string")
         self.agent.register_parameter("sam3.clip_frames", lambda: self.sam.clip_frames, lambda v: (setattr(self.sam, "clip_frames", int(v)) or self.sam.clip_frames), "SAM3 clip frames", "int")
@@ -760,7 +818,8 @@ class Win(QtWidgets.QMainWindow):
                 self.last_submitted = fid
 
         sr = self.sam.latest()
-        if sr is not None and sr.frame_id != self.last_sam_result:
+        if sr is not None and sr.sequence != self.last_sam_sequence:
+            self.last_sam_sequence = sr.sequence
             self.last_sam_result = sr.frame_id
             if sr.mask is not None:
                 vp = self.vest.estimate(sr.mask, sr.camera_context)
@@ -778,10 +837,17 @@ class Win(QtWidgets.QMainWindow):
                 self.last_validation = d
                 self.val.update_result(d)
                 txt = "axis cam " + np.array2string(vp["axis_camera"], precision=3) if vp and vp.get("ok") else "vision fit failed"
-                self.maskview.set(overlay(sr.camera_context.get("rgb"), sr.mask, txt))
+                if not self._video_preview_active:
+                    self.maskview.set(composite_overlay(
+                        sr.camera_context.get("rgb"), sr.masks,
+                        f"frame {sr.frame_id} | {len(sr.masks)} object(s)"))
             else:
                 self.last_validation = {"sam_frame_id": sr.frame_id, "sam_error": sr.error, "sam_latency_ms": sr.latency_ms}
                 self.val.update_result(self.last_validation)
+                if not self._video_preview_active and sr.camera_context:
+                    self.maskview.set(composite_overlay(
+                        sr.camera_context.get("rgb"), sr.masks,
+                        f"frame {sr.frame_id} | {sr.frame_status}"))
 
         # Visual patch with colormap
         o = self.patch.run(self.state, {
@@ -796,18 +862,16 @@ class Win(QtWidgets.QMainWindow):
         if c is not None and c.get("depth_mm") is not None:
             d = c["depth_mm"]
             params = self.colormap_params
-            print(f"[DEBUG TICK] depth range: {d.min()}-{d.max()}, valid: {(d>0).sum()}/{d.size}, params: near={params['near_mm']}, far={params['far_mm']}, dmin={params['depth_min']}, dmax={params['depth_max']}")
+            if os.environ.get("EBRUSH_DEBUG_DEPTH") == "1" and time.monotonic() - getattr(self, "_last_depth_debug", 0) >= 1:
+                self._last_depth_debug = time.monotonic()
+                print(f"[DEPTH] range={d.min()}-{d.max()} valid={(d>0).sum()}/{d.size} near={params['near_mm']} far={params['far_mm']}")
             dep_colored = apply_colormap(d, **params)
             if dep_colored is not None:
                 self.dep.set(dep_colored)
-                print(f"[DEBUG TICK] depth colored shape: {dep_colored.shape}, range: {dep_colored.min()}-{dep_colored.max()}")
 
-        # SAM3 mask overlay
-        sr = self.sam.latest()
-        if sr is not None and sr.mask is not None:
-            rgb_ctx = sr.camera_context.get("rgb") if sr.camera_context else None
-            if rgb_ctx is not None:
-                self.maskview.set(overlay(rgb_ctx, sr.mask, "SAM3 mask"))
+
+        # Live overlay is updated only when a NEW SAM3 result arrives above.
+        # Re-rendering a high-resolution mask every 16ms can block acquisition.
 
         # Agent publish
         transport = self.br.status()
@@ -836,7 +900,15 @@ class Win(QtWidgets.QMainWindow):
                                       "device_status_names": sample.get('device_status_names')})
         self.agent.publish("pose", self.state.get("pose") or {"reference_state": self.pose.reference_state, "reference_locked": False})
         srn = self.sam.latest()
-        self.agent.publish("sam3", {"last_frame": self.last_sam_result, "prompt": self.sam.prompt, "last_error": getattr(srn, "error", "") if srn else "waiting", "latency_ms": getattr(srn, "latency_ms", None) if srn else None, "score": getattr(srn, "score", None) if srn else None})
+        self.agent.publish("sam3", {"last_frame": self.last_sam_result,
+            "prompt": self.sam.prompt,
+            "last_error": getattr(srn, "error", "") if srn else "waiting",
+            "latency_ms": getattr(srn, "latency_ms", None) if srn else None,
+            "score": getattr(srn, "score", None) if srn else None,
+            "mask_count": len(srn.masks) if srn else 0,
+            "object_id_scope": "frame", "label_status": "CANDIDATE",
+            "session_policy": "stateless_per_frame",
+            "live": self.sam.status(), "video": self.video_jobs.status()})
         self.agent.publish("vision", self.last_validation or {"ok": False, "reason": "waiting"})
         self.agent.publish("validation", self.last_validation or {})
         self.agent.publish("mapper", self.mapper_debug.state())
@@ -953,8 +1025,9 @@ class Win(QtWidgets.QMainWindow):
         self._settings.setValue("ui/geometry", self.saveGeometry())
         self._settings.setValue("ui/docks", self.saveState())
         self._settings.setValue("ui/layout_mode", self.workspace.mode)
-        self.agent.close()
         self.sam.close()
+        self.video_jobs.close()
+        self.agent.close()
         self.hp.close()
         self.br.close()
         super().closeEvent(e)
