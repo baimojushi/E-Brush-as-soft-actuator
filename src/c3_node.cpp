@@ -6,6 +6,7 @@
 #include <esp_system.h>
 #include <esp_timer.h>
 #include "brush_protocol.h"
+#include "brush_sensor_status.h"
 #include "ebrush_link.h"
 #include "node_config.h"
 #include "lsm6dsr.h"
@@ -184,9 +185,8 @@ void IRAM_ATTR onHallInterrupt() {
 }
 
 // ★ 微秒级年龄计算 (用于新鲜度判断, 需在 sampleSensors 之前声明)
-uint64_t ageUs(uint64_t now_us, uint64_t then_us) {
-  if (then_us == 0) return UINT64_MAX;
-  return now_us >= then_us ? now_us - then_us : 0;
+uint32_t ageUs(uint32_t now_us32, uint32_t then_us32) {
+  return BrushSensors::sampleAgeUs32(now_us32, then_us32);
 }
 
 // ★ 检查 I²C 扫描中是否看见某地址
@@ -306,7 +306,7 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
     out.status |= BrushProtocol::STATUS_HALL_PRESENT;
     Tmag5273::Sample value{};
     bool fresh = false;
-    const uint64_t hall_check_before_us = static_cast<uint64_t>(esp_timer_get_time());
+    const uint32_t hall_check_before_us = static_cast<uint32_t>(esp_timer_get_time());
     const bool should_read =
         hallIrqFlag || ageUs(hall_check_before_us, state.hall_last) >= PERIOD_US;
 
@@ -327,14 +327,21 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
       }
     }
 
-    const uint64_t hall_check_after_us = static_cast<uint64_t>(esp_timer_get_time());
-    if (ageUs(hall_check_after_us, state.hall_last) <= MAX_STALE_US) {
+    const uint32_t hall_check_after_us = static_cast<uint32_t>(esp_timer_get_time());
+    // The TMAG5273 has been observed returning an all-zero vector (conv_status 0xD1/0x91/0x71)
+    // while the age-only check still advertised it as valid. An all-zero reading is impossible
+    // in Earth's ambient field, so such a sample must not be reported as valid.
+    const bool hall_value_plausible =
+        !(state.h.x_raw == 0 && state.h.y_raw == 0 && state.h.z_raw == 0);
+    if (ageUs(hall_check_after_us, state.hall_last) <= MAX_STALE_US && hall_value_plausible) {
       out.status |= BrushProtocol::STATUS_HALL_VALID;
       if (state.h.conv_status & 0x02) out.status |= BrushProtocol::STATUS_HALL_DIAG;
       if (abs(state.h.x_raw) > 31000 || abs(state.h.y_raw) > 31000 ||
           abs(state.h.z_raw) > 31000) out.status |= BrushProtocol::STATUS_HALL_NEAR_SAT;
-    } else {
+    } else if (ageUs(hall_check_after_us, state.hall_last) > MAX_STALE_US) {
       out.drop_flags |= BrushProtocol::DROP_HALL_STALE;
+    } else {
+      out.drop_flags |= BrushProtocol::DROP_HALL_READ_FAIL;
     }
   } else {
     out.drop_flags |= BrushProtocol::DROP_HALL_STALE;
@@ -358,18 +365,23 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
       }
     }
 
-    const uint64_t imu_check_us = static_cast<uint64_t>(esp_timer_get_time());
-    if (ageUs(imu_check_us, state.imu_last) > MAX_STALE_US) {
-      out.status &= ~(BrushProtocol::STATUS_IMU_VALID | BrushProtocol::STATUS_IMU_FRESH);
+    const uint32_t imu_check_us = static_cast<uint32_t>(esp_timer_get_time());
+    // Previously the code only set IMU_FRESH, never IMU_VALID. That suppressed
+    // S3 Mahony fusion and permanently held quaternion at its reset value.
+    const uint32_t imu_bits = BrushSensors::imuValidityBits(
+        state.imu_ready, (out.status & BrushProtocol::STATUS_IMU_FRESH) != 0,
+        imu_check_us, state.imu_last, MAX_STALE_US);
+    out.status = (out.status & ~(BrushProtocol::STATUS_IMU_VALID |
+                                BrushProtocol::STATUS_IMU_FRESH)) | imu_bits;
+    if (!(imu_bits & BrushProtocol::STATUS_IMU_VALID)) {
       out.drop_flags |= BrushProtocol::DROP_IMU_STALE;
     }
   } else {
     out.drop_flags |= BrushProtocol::DROP_IMU_STALE;
   }
 
-  if (state.imu_ready && (out.status & BrushProtocol::STATUS_IMU_VALID)) {
-    out.status |= BrushProtocol::STATUS_POSE_VALID | BrushProtocol::STATUS_POSE_YAW_RELATIVE;
-  }
+  // This C3 node only samples raw sensors. Only the S3 Mahony fusion may
+  // assert STATUS_POSE_VALID/STATUS_POSE_YAW_RELATIVE after a real update.
   if (state.i2c_recovered_since_last_frame) out.status |= BrushProtocol::STATUS_I2C_RECOVERED;
   if (state.spi_recovered_since_last_frame) out.status |= BrushProtocol::STATUS_SPI_RECOVERED;
 
@@ -403,14 +415,8 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
     }
   }
 
-  // Real-time Hall sensor debug output (every sample)
-  if (state.hall_ready) {
-    Serial.printf("HALL: x=%d y=%d z=%d t=%d conv=0x%02X dev=0x%02X\n",
-      state.h.x_raw, state.h.y_raw, state.h.z_raw,
-      state.h.temp_raw, state.h.conv_status, state.h.device_status);
-  } else {
-    Serial.println("HALL: NOT READY");
-  }
+  // Per-sample Serial prints were removed: at 200 Hz a single printf takes
+  // ~4 ms on the 115200 debug port and starved sampling/BLE notifications.
 
   fifoPush(out, static_cast<uint32_t>(esp_timer_get_time()));
 }
@@ -661,7 +667,11 @@ void loop() {
     // 关闭传感器总线与 BLE, 让电流降至 μA 级。
     hallBus.end();
     imuBus.end();
+#if defined(BRUSH_LINK_BLE)
     NimBLEDevice::deinit(true);
+#elif defined(BRUSH_LINK_WIFI)
+    WiFi.mode(WIFI_OFF);
+#endif
     esp_deep_sleep_start();
     return; // 深度睡眠后不会返回此处
   }

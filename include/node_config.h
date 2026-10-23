@@ -51,7 +51,9 @@ constexpr uint32_t STANDBY_IDLE_US  = 5 * 60 * 1000000u;  // 5 min in microsecon
 constexpr int16_t  MOTION_DELTA_LSB = 2000;              // 加速度相邻采样差阈值 (~0.12g)
 constexpr uint32_t I2C_HZ = 400000;
 constexpr uint32_t SPI_HZ = 8000000;
-constexpr uint8_t HALL_AVG_CODE = 2;  // 4 averages, less sensor conversion latency
+constexpr uint8_t HALL_AVG_CODE = 5;  // 32 averages: restores 1-LSB granularity.
+                                      // Code 2 (4 averages) quantized raw counts to multiples of 4
+                                      // and raised static noise ~3.5x; measured 2026-10-23.
 constexpr uint8_t HALL_ADDRS[] = {0x35, 0x22, 0x78, 0x44};
 constexpr size_t HALL_ADDR_COUNT = sizeof(HALL_ADDRS) / sizeof(HALL_ADDRS[0]);
 
