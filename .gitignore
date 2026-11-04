@@ -37,3 +37,6 @@ temp/
   
 __pycache__/  
 *.pyc  
+# Generated SAM3 artifacts (per-frame masks / video job output)
+runtime/sam3_production/
+runtime/sam3_video_jobs/
