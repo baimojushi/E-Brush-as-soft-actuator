@@ -332,6 +332,7 @@ class Win(QtWidgets.QMainWindow):
             sc.get("min_interval_s", 1.0),
             runtime_dir=ROOT / "runtime" / "sam3_production",
             max_frame_pixels=sc.get("max_frame_pixels", 307200),
+            min_score=sc.get("min_score", 0.0),
         )
 
         # Vision
@@ -732,6 +733,7 @@ class Win(QtWidgets.QMainWindow):
         self.agent.register_parameter("sam3.prompt", lambda: self.sam.prompt, lambda v: (setattr(self.sam, "prompt", str(v)) or self.sam.prompt), "SAM3 text prompt", "string")
         self.agent.register_parameter("sam3.clip_frames", lambda: self.sam.clip_frames, lambda v: (setattr(self.sam, "clip_frames", int(v)) or self.sam.clip_frames), "SAM3 clip frames", "int")
         self.agent.register_parameter("sam3.clip_fps", lambda: self.sam.clip_fps, lambda v: (setattr(self.sam, "clip_fps", int(v)) or self.sam.clip_fps), "SAM3 clip FPS", "int")
+        self.agent.register_parameter("sam3.min_score", lambda: self.sam.min_score, lambda v: (setattr(self.sam, "min_score", max(0.0, min(1.0, float(v)))) or self.sam.min_score), "SAM3 min confidence score", "float")
         self.agent.register_parameter("vision.ransac_threshold_mm", lambda: self.vest.ransac_mm, lambda v: (setattr(self.vest, "ransac_mm", float(v)) or self.vest.ransac_mm), "RANSAC threshold", "float")
         self.agent.register_parameter("vision.erode_px", lambda: self.vest.erode_px, lambda v: (setattr(self.vest, "erode_px", int(v)) or self.vest.erode_px), "Mask erosion", "int")
         for i, n in enumerate(("x", "y", "z")):

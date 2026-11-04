@@ -191,6 +191,29 @@ def test_strict_zip_rejects_shifted_indices_and_bad_shape():
         decode_single_json(bad, (24,32), (24,32))
 
 
+def test_single_accepts_frame_result_nested_objects():
+    """SAM3 6015 nests detected objects under "frame_result", not at the root."""
+    encoded = base64.b64encode(png_mask((24,32))).decode("ascii")
+    payload = {"success": True, "backend": "hf-pool-single", "inference_ms": 280.,
+               "frame_result": {"frame_index": -1, "num_objects": 1,
+                                "objects": [{"object_id": 0, "score": .86,
+                                             "mask_pixels": 170,
+                                             "mask_png_base64": encoded}]}}
+    masks = decode_single_json(payload, (24,32), (24,32))
+    assert len(masks) == 1
+    assert masks[0].object_id == 0
+    assert masks[0].score == pytest.approx(.86)
+    assert masks[0].mask.shape == (24,32)
+
+
+def test_zip_tolerates_server_even_pixel_rounding():
+    """The server rounds its inference size to even pixels; masks map back."""
+    raw = make_result_zip(2, shape=(23,31))
+    meta, decoded = parse_mask_zip(raw, 2, (24,32))
+    assert meta["num_frames"] == 2
+    assert all(m.mask.shape == (24,32) for v in decoded.values() for m in v)
+
+
 def test_frame_inverse_transform_portrait():
     im = np.zeros((2668,4000,3),dtype=np.uint8)
     small, transform = resize_for_inference(im)

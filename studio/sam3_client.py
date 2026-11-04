@@ -72,7 +72,7 @@ class SAM3Client:
                  clip_frames: int = 30, clip_fps: int = 30,
                  min_interval_s: float = 1., runtime_dir=None,
                  max_frame_pixels: int = 307200, transport=None,
-                 max_live_files: int = 500):
+                 max_live_files: int = 500, min_score: float = 0.0):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.prompt = str(prompt)
@@ -82,6 +82,7 @@ class SAM3Client:
         self.clip_fps = int(clip_fps)
         self.min_interval = max(.05, float(min_interval_s))
         self.max_frame_pixels = int(max_frame_pixels)
+        self.min_score = max(0.0, min(1.0, float(min_score)))
         self.transport = transport or Sam3HTTPTransport(base_url, api_key, timeout_s)
         self.runtime_dir = Path(runtime_dir) if runtime_dir else None
         self.max_live_files = max(1, int(max_live_files))
@@ -262,7 +263,7 @@ class SAM3Client:
                     path.unlink(missing_ok=True)
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
-            mask, score, bbox = choose_brush_mask(masks)
+            mask, score, bbox = choose_brush_mask(masks, self.min_score)
             status = "ERROR" if error else ("CANDIDATE" if masks else "NO_OBJECT")
             with self._lock:
                 self._sequence += 1

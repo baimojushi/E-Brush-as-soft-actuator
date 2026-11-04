@@ -35,13 +35,23 @@ MAX_RESPONSE_BYTES = 100 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 250 * 1024 * 1024
 
 
+def _is_local_or_tailscale(hostname: str) -> bool:
+    """Allow localhost and Tailscale MagicDNS domains without auth."""
+    if hostname in ("127.0.0.1", "localhost", "::1"):
+        return True
+    # Tailscale MagicDNS: *.ts.net, *.tailb2b872.ts.net, etc.
+    if hostname.endswith(".ts.net"):
+        return True
+    return False
+
+
 def validate_base_url(url: str, key: str = "") -> str:
     p = urlsplit(url.strip())
     if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password or p.query or p.fragment:
         raise ValueError("SAM3 base URL must be an http(s) URL without credentials, query or fragment")
-    if p.scheme == "http" and p.hostname not in ("127.0.0.1", "localhost", "::1"):
+    if p.scheme == "http" and not _is_local_or_tailscale(p.hostname):
         raise ValueError("Remote SAM3 access requires HTTPS or a localhost tunnel")
-    if p.hostname not in ("127.0.0.1", "localhost", "::1") and not key:
+    if not _is_local_or_tailscale(p.hostname) and not key:
         raise ValueError("Non-local SAM3 requires authentication")
     return url.rstrip("/")
 
@@ -112,6 +122,10 @@ def decode_single_json(payload: dict, inference_shape: tuple[int, int],
     if not isinstance(root, dict):
         raise Sam3ProtocolError("Single result is not an object")
     objects = root.get("objects")
+    if objects is None and isinstance(root.get("frame_result"), dict):
+        # SAM3 6015 nests detected objects under "frame_result".
+        root = root["frame_result"]
+        objects = root.get("objects")
     if objects is None:
         objects = root.get("masks")
     if objects is None:
@@ -146,10 +160,12 @@ def decode_single_json(payload: dict, inference_shape: tuple[int, int],
     return result
 
 
-def choose_brush_mask(masks: list[RemoteMask]):
-    """Choose one candidate for legacy shaft estimation; retain all masks separately."""
-    best = max((m for m in masks if np.any(m.mask)),
-               key=lambda m: (m.score, int(m.mask.sum())), default=None)
+def choose_brush_mask(masks: list[RemoteMask], min_score: float = 0.0):
+    """Choose one candidate for legacy shaft estimation; retain all masks separately.
+    Masks with score < min_score are filtered out before selection.
+    """
+    cands = [m for m in masks if np.any(m.mask) and m.score >= min_score]
+    best = max(cands, key=lambda m: (m.score, int(m.mask.sum())), default=None)
     if best is None:
         return None, 0.0, None
     ys, xs = np.nonzero(best.mask)
@@ -318,8 +334,14 @@ def parse_mask_zip(raw: bytes, expected_frames: int, shape: tuple[int, int]):
             if info.file_size > MAX_MASK_BYTES:
                 raise Sam3ProtocolError("Individual mask exceeds byte cap")
             m = cv2.imdecode(np.frombuffer(z.read(n), np.uint8), cv2.IMREAD_GRAYSCALE)
-            if m is None or m.shape != shape:
-                raise Sam3ProtocolError(f"Mask {n} does not match frame size {shape}")
+            if m is None:
+                raise Sam3ProtocolError(f"Mask {n} is not a decodable image")
+            if m.shape != shape:
+                # The server rounds its inference resolution to even pixels, so a
+                # mask may arrive 1px off per axis; map it back to source pixels.
+                if abs(m.shape[0] - shape[0]) > 2 or abs(m.shape[1] - shape[1]) > 2:
+                    raise Sam3ProtocolError(f"Mask {n} does not match frame size {shape}")
+                m = cv2.resize(m, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST)
             score = scores.get((i, obj), match.group(3))
             results[i].append(RemoteMask(obj, _valid_score(score), m > 127))
         if rows is not None:
