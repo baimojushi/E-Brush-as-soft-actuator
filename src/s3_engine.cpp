@@ -169,6 +169,20 @@ void sendHealth() {
   health.free_heap = ESP.getFreeHeap();
   health.min_free_heap = ESP.getMinFreeHeap();
   health.hall_variant = e.meta.hall_variant;
+  // V1.1 diagnostics tail: mirror the C3 SensorState fields carried in Meta
+  // (a v1.0 C3 sends a 36-byte Meta, so these stay zero -- same as before).
+  health.i2c_scan_bitmap_lo = e.meta.i2c_scan_bitmap_lo;
+  health.i2c_scan_bitmap_hi = e.meta.i2c_scan_bitmap_hi;
+  health.i2c_scan_duration_us = e.meta.i2c_scan_duration_us;
+  health.hall_recoveries = e.meta.hall_recoveries;
+  health.imu_recoveries = e.meta.imu_recoveries;
+  health.i2c_scan_count = e.meta.i2c_scan_count;
+  health.i2c_scan_done = e.meta.i2c_scan_done;
+  health.hall_i2c_address = e.meta.hall_i2c_address;
+  health.hall_init_error = e.meta.hall_init_error;
+  health.hall_manufacturer_lsb = e.meta.hall_manufacturer_lsb;
+  health.hall_manufacturer_msb = e.meta.hall_manufacturer_msb;
+  health.hall_device_id = e.meta.hall_device_id;
   (void)usbWrite(PacketType::HEALTH, &health, sizeof(health));
 
   LinkHealthPayload link{};
@@ -367,7 +381,11 @@ void handleRadioPacket(const RadioMessage& msg) {
   e.last_packet_seq = hdr.bundle_seq;
   if (hdr.type == TYPE_META) {
     Meta info{};
-    memcpy(&info, payload, sizeof(info));
+    // Prefix-compatible: a v1.0 (36-byte) Meta leaves the V1.1 diag tail
+    // zero-initialized instead of overreading the payload buffer.
+    const uint16_t copy_len =
+        hdr.payload_len < sizeof(info) ? hdr.payload_len : sizeof(info);
+    memcpy(&info, payload, copy_len);
     receiveMeta(info);
     return;
   }

@@ -612,13 +612,26 @@ void maybeSend(uint32_t now) {
     meta.last_sensor_time_us32 = state.last_sample_tick;
     meta.hall_variant = state.hall_variant;
     meta.imu_whoami = imu.whoAmI();
-    // ★ V1.1 扩展诊断字段 (兼容旧版 Meta 结构, 新字段追加在后, S3 端可选解析)
-    // 这里复用 reserved 字段传递部分诊断信息
 #ifdef BRUSH_LINK_BLE
     meta.transport_id = 1;
 #else
     meta.transport_id = 2;
 #endif
+    // V1.1 diagnostics tail: the S3 relays these 1:1 into HealthPayload so
+    // the host can see the bus scan result and the Hall identity without a
+    // serial console on the C3.
+    meta.i2c_scan_bitmap_lo = state.i2c_scan_bitmap_lo;
+    meta.i2c_scan_bitmap_hi = state.i2c_scan_bitmap_hi;
+    meta.i2c_scan_duration_us = state.i2c_scan_duration_us;
+    meta.hall_recoveries = state.hall_recoveries;
+    meta.imu_recoveries = state.imu_recoveries;
+    meta.i2c_scan_count = state.i2c_scan_count;
+    meta.i2c_scan_done = state.i2c_scan_done;
+    meta.hall_i2c_address = state.hall_i2c_address;
+    meta.hall_init_error = state.hall_init_error;
+    meta.hall_manufacturer_lsb = state.hall_manufacturer_lsb;
+    meta.hall_manufacturer_msb = state.hall_manufacturer_msb;
+    meta.hall_device_id = state.hall_device_id;
     const size_t size = make_packet(TYPE_META, state.packet_seq++, &meta,
       sizeof(meta), 1, wire, sizeof(wire));
     const bool sent = size && transportSend(wire, size);
