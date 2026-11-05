@@ -68,6 +68,7 @@ DROP_BITS = {
 HALL_LSB_PER_MT_BY_VARIANT = {
     1: 820.0,  # VER=1, _RANGE=0 -> ±40 mT
     2: 250.0,  # VER=2, _RANGE=0 -> ±133 mT
+    3: 40960.0,  # MMC5983MA: 18-bit sample >>2, zero-field offset removed on C3
 }
 
 HALL_INIT_ERROR_NAMES = {

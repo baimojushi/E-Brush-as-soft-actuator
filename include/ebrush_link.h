@@ -29,6 +29,8 @@ struct Sample {
   uint32_t drop_flags;  // BrushProtocol::DropFlags
   uint16_t hall_age_us; // 0xffff = no measurement
   uint16_t imu_age_us;
+  // Hall is signed int16. TMAG uses its native 16-bit code; MMC5983MA
+  // uses (raw18 >> 2) - 32768 with 40960 LSB/mT (Meta.hall_variant=3).
   int16_t hx, hy, hz, ht;
   int16_t it, gx, gy, gz, ax, ay, az;
   uint8_t hall_conv, hall_device, imu_status, reserved;
@@ -43,7 +45,7 @@ struct Meta {
   uint32_t hall_reinits;
   uint32_t imu_reinits;
   uint32_t last_sensor_time_us32;
-  uint8_t hall_variant;
+  uint8_t hall_variant;  // 1/2=TMAG5273, 3=MMC5983MA, 0=unknown
   uint8_t imu_whoami;
   uint8_t transport_id; // 1=BLE; 2=Wi-Fi
   uint8_t reserved;

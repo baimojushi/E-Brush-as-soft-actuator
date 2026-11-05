@@ -146,9 +146,9 @@ struct HealthPayload {
 
   uint8_t i2c_scan_count;
   uint8_t i2c_scan_done;
-  uint8_t hall_i2c_address;     // 0 = 尚未确认 TMAG5273
-  uint8_t hall_variant;         // DEVICE_ID.VER: 1 / 2，0 = 未确认
-  uint8_t hall_init_error;      // Tmag5273::InitError
+  uint8_t hall_i2c_address;     // 0 = Hall not identified
+  uint8_t hall_variant;         // 1/2=TMAG5273, 3=MMC5983MA, 0=unknown
+  uint8_t hall_init_error;      // TMAG or MMC5983MA init error
   uint8_t hall_manufacturer_lsb;
   uint8_t hall_manufacturer_msb;
   uint8_t hall_device_id;

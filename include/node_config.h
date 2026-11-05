@@ -5,7 +5,7 @@
 // ESP32-S3 original GPIO12/13 were FLASH pins on C3 and MUST NOT be copied.
 // Avoid C3 strap GPIO2/8/9, USB GPIO18/19, and flash GPIO11..17.
 // Pin planning for the current C3 pen board:
-//   - Hall TMAG5273 uses the right-side contiguous cluster GPIO5/GPIO6,
+//   - Hall MMC5983MA or TMAG5273 uses GPIO5/GPIO6,
 //     with GPIO7 reserved for a future DRDY/INT wire if needed.
 //   - IMU LSM6DSR stays on the left side to reduce crossover wiring.
 #ifndef EB_PIN_HALL_SDA
@@ -54,7 +54,8 @@ constexpr uint32_t SPI_HZ = 8000000;
 constexpr uint8_t HALL_AVG_CODE = 5;  // 32 averages: restores 1-LSB granularity.
                                       // Code 2 (4 averages) quantized raw counts to multiples of 4
                                       // and raised static noise ~3.5x; measured 2026-10-23.
-constexpr uint8_t HALL_ADDRS[] = {0x35, 0x22, 0x78, 0x44};
+// Probe MMC5983MA first (0x30), then legacy TMAG5273 address variants.
+constexpr uint8_t HALL_ADDRS[] = {0x30, 0x35, 0x22, 0x78, 0x44};
 constexpr size_t HALL_ADDR_COUNT = sizeof(HALL_ADDRS) / sizeof(HALL_ADDRS[0]);
 
 constexpr const char* WIFI_SSID = "EBrush-S3";

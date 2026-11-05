@@ -11,6 +11,8 @@
 #include "node_config.h"
 #include "lsm6dsr.h"
 #include "tmag5273.h"
+#include "mmc5983ma.h"
+#include "hall_units.h"
 
 #if defined(BRUSH_LINK_BLE)
 #include <NimBLEDevice.h>
@@ -27,11 +29,13 @@ using namespace NodeConfig;
 namespace {
 TwoWire hallBus(0);
 SPIClass imuBus(FSPI);
-Tmag5273 hall;
+Tmag5273 hallTmag;
+Mmc5983ma hallMmc;
 Lsm6dsr imu;
 
 struct SensorState {
   bool hall_ready = false;
+  bool hall_is_mmc = false;
   bool imu_ready = false;
   uint32_t hall_last = 0;
   uint32_t imu_last = 0;
@@ -198,37 +202,59 @@ bool i2cAddressSeen(uint8_t address) {
   return (state.i2c_scan_bitmap_hi & (1ULL << (address - 0x40))) != 0;
 }
 
-// ★ 捕获 Hall 身份诊断信息, 供 HEALTH/META 上报
-void captureHallIdentityDiagnostics() {
-  state.hall_variant = hall.variant();
-  state.hall_manufacturer_lsb = hall.manufacturerLsb();
-  state.hall_manufacturer_msb = hall.manufacturerMsb();
-  state.hall_device_id = hall.deviceIdRaw();
-  state.hall_init_error = static_cast<uint8_t>(hall.lastInitError());
+// Probe each model using its own register map and identity check.
+// The 36-byte C3 META packet carries HallUnits variant (3 for MMC5983MA).
+bool tryHallAddress(uint8_t address) {
+  bool ok = false;
+  if (address == 0x30) {
+    ok = hallMmc.begin(hallBus, address);
+    state.hall_is_mmc = ok;
+    state.hall_variant = ok ? HallUnits::MMC5983MA : 0;
+    state.hall_manufacturer_lsb = 0;
+    state.hall_manufacturer_msb = 0;
+    state.hall_device_id = hallMmc.productId();
+    state.hall_init_error = static_cast<uint8_t>(hallMmc.lastInitError());
+  } else {
+    ok = hallTmag.begin(hallBus, address, HALL_AVG_CODE, false);
+    state.hall_is_mmc = false;
+    state.hall_variant = ok ? hallTmag.variant() : 0;
+    state.hall_manufacturer_lsb = hallTmag.manufacturerLsb();
+    state.hall_manufacturer_msb = hallTmag.manufacturerMsb();
+    state.hall_device_id = hallTmag.deviceIdRaw();
+    state.hall_init_error = static_cast<uint8_t>(hallTmag.lastInitError());
+  }
+  if (!ok) return false;
+  state.hall_i2c_address = address;
+  state.hall_init_error = 0;
+  state.hall_consecutive_read_errors = 0;
+  state.hall_last = 0;
+  state.h = Tmag5273::Sample{};
+  state.recover_bits |= BrushProtocol::STATUS_I2C_RECOVERED;
+  return true;
 }
 
-// ★ 尝试指定地址初始化 Hall
-bool tryHallAddress(uint8_t address) {
-  const bool ok = hall.begin(
-      hallBus, address, HALL_AVG_CODE, false); // low_noise=false 对应旧版本
-  captureHallIdentityDiagnostics();
-
-  if (ok) {
-    state.hall_i2c_address = address;
-    state.hall_variant = hall.variant();
-    state.hall_init_error = static_cast<uint8_t>(Tmag5273::InitError::NONE);
-    state.hall_consecutive_read_errors = 0;
-    state.hall_last = 0;
-    state.recover_bits |= BrushProtocol::STATUS_I2C_RECOVERED;
-    return true;
+// Both models expose the same C3 link sample fields, but not the same units.
+bool readHallSample(Tmag5273::Sample& out, bool& fresh) {
+  fresh = false;
+  if (!state.hall_is_mmc) return hallTmag.readSample(out, fresh);
+  Mmc5983ma::Sample mmc{};
+  if (!hallMmc.readSample(mmc, fresh)) return false;
+  if (fresh) {
+    out.temp_raw = mmc.temp_raw;
+    out.x_raw = mmc.x_raw;
+    out.y_raw = mmc.y_raw;
+    out.z_raw = mmc.z_raw;
+    out.conv_status = mmc.conv_status;
+    out.device_status = mmc.device_status;
   }
-  return false;
+  return true;
 }
 
 bool initHall(bool recover_bus = true) {
   if (recover_bus) recoverI2CBus(true);
 
   state.hall_i2c_address = 0;
+  state.hall_is_mmc = false;
   state.hall_variant = 0;
   state.hall_init_error = 0;
   state.hall_manufacturer_lsb = 0;
@@ -311,9 +337,13 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
         hallIrqFlag || ageUs(hall_check_before_us, state.hall_last) >= PERIOD_US;
 
     if (should_read) {
-      if (hall.readSample(value, fresh)) {
-        state.h = value;
-        state.hall_last = static_cast<uint32_t>(esp_timer_get_time());
+      if (readHallSample(value, fresh)) {
+        // A register read with no new conversion is neither a valid sample
+        // nor a bus fault. Retain the previous measurement timestamp.
+        if (fresh) {
+          state.h = value;
+          state.hall_last = static_cast<uint32_t>(esp_timer_get_time());
+        }
         state.hall_consecutive_read_errors = 0;
         hallIrqFlag = false;
       } else {
@@ -328,10 +358,9 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
     }
 
     const uint32_t hall_check_after_us = static_cast<uint32_t>(esp_timer_get_time());
-    // The TMAG5273 has been observed returning an all-zero vector (conv_status 0xD1/0x91/0x71)
-    // while the age-only check still advertised it as valid. An all-zero reading is impossible
-    // in Earth's ambient field, so such a sample must not be reported as valid.
-    const bool hall_value_plausible =
+    // Retain the legacy TMAG5273 all-zero fault guard. MMC5983MA's centered
+    // signed output CAN legitimately be all zero in a near-zero field.
+    const bool hall_value_plausible = state.hall_is_mmc ||
         !(state.h.x_raw == 0 && state.h.y_raw == 0 && state.h.z_raw == 0);
     if (ageUs(hall_check_after_us, state.hall_last) <= MAX_STALE_US && hall_value_plausible) {
       out.status |= BrushProtocol::STATUS_HALL_VALID;
@@ -351,10 +380,12 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
     Lsm6dsr::Sample value{};
     bool fresh = false;
     if (imu.readSample(value, fresh)) {
-      state.i = value;
-      state.imu_last = static_cast<uint32_t>(esp_timer_get_time());
+      if (fresh) {
+        state.i = value;
+        state.imu_last = static_cast<uint32_t>(esp_timer_get_time());
+        out.status |= BrushProtocol::STATUS_IMU_FRESH;
+      }
       state.imu_consecutive_read_errors = 0;
-      if (fresh) out.status |= BrushProtocol::STATUS_IMU_FRESH;
     } else {
       ++state.imu_errors;
       out.drop_flags |= BrushProtocol::DROP_IMU_READ_FAIL;
@@ -384,6 +415,12 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
   // assert STATUS_POSE_VALID/STATUS_POSE_YAW_RELATIVE after a real update.
   if (state.i2c_recovered_since_last_frame) out.status |= BrushProtocol::STATUS_I2C_RECOVERED;
   if (state.spi_recovered_since_last_frame) out.status |= BrushProtocol::STATUS_SPI_RECOVERED;
+
+  // Without these ages S3 mapped every Hall/IMU timestamp as zero. Use a
+  // 0xffff sentinel until each sensor has produced its first valid sample.
+  const uint32_t stamp_now = static_cast<uint32_t>(esp_timer_get_time());
+  out.hall_age_us = age16(stamp_now, state.hall_last);
+  out.imu_age_us = age16(stamp_now, state.imu_last);
 
   out.hx = state.h.x_raw;
   out.hy = state.h.y_raw;
@@ -632,9 +669,13 @@ void setup() {
   state.hall_ready = initHall(false); // 已在 recoverI2CBus 中恢复总线
   Serial.printf("Hall ready: %s\n", state.hall_ready ? "YES" : "NO");
   if (state.hall_ready) {
-    Serial.printf("  Hall I2C addr: 0x%02X, variant: %u\n", state.hall_i2c_address, state.hall_variant);
+    Serial.printf("  Hall I2C addr: 0x%02X, model: %s, variant: %u\n",
+        state.hall_i2c_address, state.hall_is_mmc ? "MMC5983MA" : "TMAG5273",
+        state.hall_variant);
   } else {
-    Serial.printf("  Hall init error: %u\n", state.hall_init_error);
+    Serial.printf("  Hall init error: %u; MMC 0x30 ID: 0x%02X; scan 0x30: %s\n",
+        state.hall_init_error, state.hall_device_id,
+        i2cAddressSeen(0x30) ? "ACK" : "NO ACK");
   }
 
   Serial.println("Initializing IMU...");

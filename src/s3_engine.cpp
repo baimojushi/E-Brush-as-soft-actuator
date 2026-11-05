@@ -13,6 +13,7 @@
 #include "mahony6.h"
 #include "node_config.h"
 #include "s3_adaptive.h"
+#include "hall_units.h"
 #include <Wire.h>
 #include <esp32-hal-rgb-led.h>
 
@@ -313,9 +314,14 @@ void receiveFrame(const Sample& s, uint64_t c3_t_unwrapped, uint32_t& previous_i
     ++e.usb_data_sent;
   ++e.rx_good_frames;
 
-  const bool hall_unit_known = e.hall_variant == 1 || e.hall_variant == 2;
-  const float lsb_per_mT = e.hall_variant == 1 ? 820.f : 250.f;
-  float hall_mT[3] = {s.hx / lsb_per_mT, s.hy / lsb_per_mT, s.hz / lsb_per_mT};
+  const float lsb_per_mT = HallUnits::lsbPerMilliTesla(e.hall_variant);
+  const bool hall_unit_known = lsb_per_mT > 0.0f;
+  float hall_mT[3] = {0.f, 0.f, 0.f};
+  if (hall_unit_known) {
+    hall_mT[0] = s.hx / lsb_per_mT;
+    hall_mT[1] = s.hy / lsb_per_mT;
+    hall_mT[2] = s.hz / lsb_per_mT;
+  }
   float acceleration_g[3] = {s.ax*.000122f, s.ay*.000122f, s.az*.000122f};
   const float dt = e.last_output_us ?
       static_cast<float>(t_s3 - e.last_output_us) * 1e-6f : .005f;
