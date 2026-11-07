@@ -1,0 +1,110 @@
+{
+  "format_version": "1.0",
+  "sdk_version": "v1.2.14.20240129",
+  "sdk_path": "D:\\Express Program Files\\Angstrong Viewer V2.1.10_240109\\Angstrong Viewer V2.1.10_240109\\RelWithDebInfo\\AngstrongCameraSdk.dll",
+  "config_file": "D:\\Express Program Files\\Angstrong Viewer V2.1.10_240109\\Angstrong Viewer V2.1.10_240109\\RelWithDebInfo\\configurationfiles\\hp60c_v2_00_20230704_configEncrypt.json",
+  "device": {
+    "model": "HP60C",
+    "serial_number": "ASC60CF08000539",
+    "firmware": "DLS_VERc20865=:V01.09_2024110714:V01.19_2024110714:L01"
+  },
+  "capture": {
+    "date_utc": "2026-07-31T17:58:29+0800",
+    "resolution_when_read": "640x480 (depth_decimal=False, uint16 mm)"
+  },
+  "intrinsics": {
+    "rgb": {
+      "fx": 583.936536609909,
+      "fy": 584.7110072086862,
+      "cx": 337.52662648203057,
+      "cy": 235.27076084105494,
+      "width": 640,
+      "height": 480
+    },
+    "depth": {
+      "fx": 421.893219,
+      "fy": 421.451019,
+      "cx": 320.463593,
+      "cy": 237.050751,
+      "width": 640,
+      "height": 480
+    }
+  },
+  "distortion": {
+    "rgb": {
+      "k1": -0.018551162092571415,
+      "k2": 0.4767321470864813,
+      "p1": 0.0001360337423618726,
+      "p2": 0.0016659518780197354,
+      "k3": -1.252309932027979,
+      "k4": 0.0,
+      "k5": 0.0,
+      "k6": 0.0
+    },
+    "depth": {
+      "k1": 0.0,
+      "k2": 0.0,
+      "p1": 0.0,
+      "p2": 0.0,
+      "k3": 0.0
+    },
+    "note": "SDK 返回全部畸变系数为 0 (pinhole 假设 / 未标定畸变)。"
+  },
+  "extrinsics_depth_to_rgb": {
+    "rotation": [
+      [
+        0.999994,
+        0.000443,
+        -0.003517
+      ],
+      [
+        -0.000419,
+        0.999976,
+        0.006975
+      ],
+      [
+        0.00352,
+        -0.006974,
+        0.999969
+      ]
+    ],
+    "translation_mm": [
+      -12.098233,
+      0.163637,
+      0.178466
+    ],
+    "convention": "Depth -> RGB (R, T): X_rgb = R * X_depth + T"
+  },
+  "depth_scale": {
+    "depth_decimal": false,
+    "uint16_unit": "1 count = 1 mm",
+    "float32_mode_note": "配置 depth_decimal=True 时输出 float32, 单位米 (SDK 点云 /1000 佐证)",
+    "invalid_value": 0,
+    "observed_range_mm": {
+      "min": 0,
+      "max": 355,
+      "median_nonzero": 341
+    }
+  },
+  "binding": {
+    "bound_to_serial": "参数由设备/加密配置提供 (GetCamParameter), 与序列号绑定于设备; 磁盘无 per-SN 标定文件 (SDK 目录仅 kondyor/kunlun 有 calibration_files)",
+    "resolution_dependent": "接口层面为单一参数集; 320x240 流在 Windows MF 后端无法启动(ret=-86), 分辨率相关内参无法实证"
+  },
+  "versioning": {
+    "sdk_provided": "SDK 无标定版本号 API; 本文件以 format_version 自编号",
+    "config_version": "hp60c_v2_00_20230704_configEncrypt.json (配置版本 v2.0.0.20230704, 见 SDK 日志)"
+  },
+  "confidence": "SDK 不提供深度置信度 (GetCapability(PEAK) 返回 -3)",
+  "calibration_metadata": {
+    "source": "expC_recomputation",
+    "pattern_cols": 8,
+    "pattern_rows": 6,
+    "square_size_mm": 24.9,
+    "images_used": 54,
+    "rms_reprojection_error_px": 0.22929929499580734,
+    "mean_reprojection_error_px": 0.0276656291676792,
+    "max_reprojection_error_px": 0.0962717714546568,
+    "flags_used": "CALIB_USE_INTRINSIC_GUESS | CALIB_RATIONAL_MODEL",
+    "note": "使用 expC 3轮 x 18张 = 54张棋盘格图像重新标定, 替换了 SDK 返回的零畸变假设"
+  }
+}
