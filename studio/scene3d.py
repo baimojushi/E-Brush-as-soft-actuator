@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
-from PySide6 import QtWidgets, QtCore
+from PySide6 import QtWidgets, QtCore, QtGui
+from material_theme import tokens as material_tokens
 import pyqtgraph.opengl as gl
 
 def _empty(item):
@@ -86,6 +87,7 @@ class Scene3D(QtWidgets.QWidget):
         self.view=gl.GLViewWidget(); L.addWidget(self.view)
         self.view.setCameraPosition(distance=900,elevation=28,azimuth=-55)
         grid=gl.GLGridItem(); grid.setSize(700,700); grid.setSpacing(50,50); self.view.addItem(grid)
+        self.grid = grid
         
         # --- Existing items ---
         self.imu=gl.GLLinePlotItem(width=5,antialias=True)
@@ -111,7 +113,7 @@ class Scene3D(QtWidgets.QWidget):
         
         # --- NEW: Euler angle labels (2D overlay) ---
         self.euler_info = QtWidgets.QLabel("IMU 姿态：Roll=0.0° Pitch=0.0° Yaw=0.0°")
-        self.euler_info.setStyleSheet("font-family: monospace; font-size: 12px; color: #e0e0e0; background: rgba(0,0,0,150); padding: 6px;")
+        self.euler_info.setObjectName("sceneOverlay")
         self.euler_info.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         self.euler_info.setWordWrap(True)
         # Add as overlay widget (will be positioned in resizeEvent)
@@ -123,11 +125,30 @@ class Scene3D(QtWidgets.QWidget):
         
         self.pc=gl.GLScatterPlotItem(size=1.5,pxMode=True); self.view.addItem(self.pc)
         self.info=QtWidgets.QLabel("三维场景：等待数据")
+        self.info.setObjectName("mutedLabel")
         self.info.setWordWrap(True)
         self.info.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         L.addWidget(self.info)
         self.show_pc=True
         self.world_anchor=np.array([-220.0,-220.0,90.0],float)
+
+    def set_theme(self, mode="light"):
+        colors = material_tokens(mode)
+        try:
+            self.view.setBackgroundColor(QtGui.QColor(colors["plot_background"]))
+        except Exception:
+            pass
+        try:
+            self.grid.setColor(QtGui.QColor(colors["outline_variant"]))
+        except Exception:
+            pass
+        overlay_bg = "rgba(20, 28, 25, 218)" if str(mode).lower() == "dark" else "rgba(255, 255, 255, 224)"
+        overlay_fg = colors["on_surface"]
+        self.euler_info.setStyleSheet(
+            "font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 10px; "
+            f"color: {overlay_fg}; background: {overlay_bg}; "
+            f"border: 1px solid {colors['outline_variant']}; border-radius: 10px; padding: 8px;"
+        )
 
     def _size_overlay(self):
         self.euler_info.setMaximumWidth(max(100, min(320, self.view.width()-20)))

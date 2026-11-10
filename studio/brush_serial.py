@@ -68,7 +68,7 @@ DROP_BITS = {
 HALL_LSB_PER_MT_BY_VARIANT = {
     1: 820.0,  # VER=1, _RANGE=0 -> ±40 mT
     2: 250.0,  # VER=2, _RANGE=0 -> ±133 mT
-    3: 40960.0,  # MMC5983MA: 18-bit sample >>2, zero-field offset removed on C3
+    3: 40960.0,  # MMC5983MA: (18-bit unsigned >> 2) - 32768, ±0.8 mT
 }
 
 HALL_INIT_ERROR_NAMES = {
@@ -81,6 +81,10 @@ HALL_INIT_ERROR_NAMES = {
     6: "config_write",
     7: "config_readback",
     8: "no_candidate_ack",
+    9: "mmc_product_id_read",
+    10: "mmc_product_id_mismatch",
+    11: "mmc_config_write",
+    12: "mmc_status_read",
 }
 
 HALL_TEMP_T0_RAW = 17508.0
@@ -299,77 +303,28 @@ class RawLogger:
             pass
 
 
-# The S3 bridge reaches the host through an external USB-UART adapter, so match
-# VID/PID instead of description text: Windows localizes that text, and a
-# Chinese build reports the Espressif native-USB port as "USB 串行设备 (COM3)"
-# and the CH343 as "USB-Enhanced-SERIAL CH343 (COM7)".  Keywords alone see only
-# the second one.
-_BRIDGE_VIDS: Dict[int, Optional[Tuple[int, ...]]] = {
-    0x1A86: (0x55D3, 0x7523, 0x5523, 0x55D4),  # WCH CH343 / CH340 / CH341
-    0x10C4: None,                              # Silicon Labs CP210x
-    0x0403: None,                              # FTDI
-}
-# Espressif USB-Serial-JTAG/CDC (303A:1001) is the *debug* port of the C3 (and
-# of an S3 on its native USB).  It never carries BRUSH-V1 -- the C3 sample
-# packets leave over BLE and the S3 writes the host stream to UART0 -- and
-# opening it with pyserial's default DTR/RTS resets the chip into ROM download
-# mode.  Excluded from auto-detect; pass --port explicitly if you ever need it.
-_DEBUG_VIDS = (0x303A,)
-_KEYWORDS = ("espressif", "cp210", "usb serial", "jtag", "uart",
-             "ch340", "ch343", "wch", "usb-uart", "1a86", "ftdi")
-_BLUETOOTH_HWID_MARKERS = ("BTHENUM", "RFCOMM")
-
-
-def _port_description(entry) -> str:
-    return " ".join(filter(None, (getattr(entry, "description", None),
-                                  getattr(entry, "manufacturer", None),
-                                  getattr(entry, "product", None))))
-
-
-def classify_candidates(entries) -> List[Tuple[int, str, str]]:
-    """Rank ``(rank, device, description)``; lower rank = better BRUSH-V1 bet.
-
-    Pure function over pyserial ``ListPortInfo``-like objects, so the selection
-    rules stay testable without hardware.  Rank 0 is a known USB-UART bridge,
-    1 the same vendor with an unexpected PID, 2 an unknown device matched by
-    keyword.  Bluetooth/virtual ports and Espressif debug ports are dropped.
-    """
-    ranked: List[Tuple[int, str, str]] = []
-    for entry in entries:
-        hwid = (getattr(entry, "hwid", "") or "").upper()
-        if any(marker in hwid for marker in _BLUETOOTH_HWID_MARKERS):
-            continue  # virtual port: blocks on open, never BRUSH-V1
-        vid = getattr(entry, "vid", None)
-        if vid in _DEBUG_VIDS:
-            continue
-        desc = _port_description(entry)
-        if vid in _BRIDGE_VIDS:
-            pids = _BRIDGE_VIDS[vid]
-            rank = 0 if pids is None or getattr(entry, "pid", None) in pids else 1
-        elif any(k in desc.lower() for k in _KEYWORDS):
-            rank = 2
-        else:
-            continue
-        ranked.append((rank, entry.device, desc))
-    ranked.sort(key=lambda item: (item[0], item[1]))
-    return ranked
-
-
 def list_candidate_ports() -> List[Tuple[str, str]]:
-    """``(device, description)`` for ports that can carry BRUSH-V1, best first."""
+    """Return (device, description) for ports whose descriptors match a keyword.
+
+    Keywords cover:
+      - ESP32-S3 official USB-JTAG/Serial (espressif, jtag, uart)
+      - CP210x (cp210)
+      - WCH CH340 / CH343 (wch, ch340, ch343, 1a86 [CH343 VID hex])
+      - Generic USB-Serial adapters (usb serial, usb-uart)
+    """
     if list_ports is None:
         return []
-    return [(device, desc)
-            for _rank, device, desc in classify_candidates(list_ports.comports())]
-
-
-def is_debug_port(port: str) -> bool:
-    """True for an Espressif native-USB debug port (never a BRUSH-V1 bridge)."""
-    if list_ports is None:
-        return False
-    return any(getattr(p, "device", None) == port
-               and getattr(p, "vid", None) in _DEBUG_VIDS
-               for p in list_ports.comports())
+    candidates = []
+    for p in list_ports.comports():
+        desc = " ".join(filter(None, [p.description, p.manufacturer, p.product]))
+        low = desc.lower()
+        if any(k in low for k in (
+            "espressif", "cp210", "usb serial", "jtag", "uart",
+            "ch340", "ch343", "wch", "usb-uart",
+            "1a86",  # WCH CH343 VID hex
+        )):
+            candidates.append((p.device, desc))
+    return candidates
 
 
 class BrushSerial:
@@ -694,7 +649,7 @@ class BrushSerial:
         hall_variant = 0
         if self.latest_health:
             hall_variant = int(self.latest_health.get("hall_variant", 0) or 0)
-        if hall_variant not in (1, 2) and self.latest_hello:
+        if hall_variant not in HALL_LSB_PER_MT_BY_VARIANT and self.latest_hello:
             hall_variant = int(self.latest_hello.get("hall_variant", 0) or 0)
 
         hall_lsb_per_mT = HALL_LSB_PER_MT_BY_VARIANT.get(hall_variant)
@@ -734,7 +689,10 @@ class BrushSerial:
             "bx_mT": bx_mT,
             "by_mT": by_mT,
             "bz_mT": bz_mT,
-            "hall_temp_C": HALL_TEMP_T0_C + (ht - HALL_TEMP_T0_RAW) / HALL_TEMP_LSB_PER_C,
+            # MMC C3 sends magnetic conversions only; do not decode its
+            # unmeasured temperature field with TMAG5273's coefficients.
+            "hall_temp_C": (math.nan if hall_variant == 3 else
+                            HALL_TEMP_T0_C + (ht - HALL_TEMP_T0_RAW) / HALL_TEMP_LSB_PER_C),
             "imu_temp_C": 25.0 + imu_temp / 256.0,
             "gx_rad_s": gx * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
             "gy_rad_s": gy * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
@@ -761,18 +719,8 @@ class BrushSerial:
 # Auto-detect helpers
 # ---------------------------------------------------------------------------
 
-# Any of these proves the port is the BRUSH-V1 bridge: DATA, HELLO, HEALTH,
-# SYNC_RESP, plus the S3's supplemental 0x20 (adaptive output) / 0x21 (link).
-_PROBE_HIT_TYPES = frozenset({PT_DATA, PT_HELLO, PT_HEALTH, PT_SYNC_RESP, 0x20, 0x21})
-
-
-def active_probe(port: str, baud: int = 921600, timeout: float = 1.5) -> bool:
-    """Open port, send one PING, look for any BRUSH-V1 reply.
-
-    Any valid frame type counts: a running S3 whose C3 radio link is down skips
-    PING -> HELLO (sendHello needs Meta) but still emits HEALTH every 1 s
-    (HEALTH_INTERVAL_MS), which is why the default window covers 1.5 s.
-    """
+def active_probe(port: str, baud: int = 921600, timeout: float = 0.6) -> bool:
+    """Open port, send one PING, look for SYNC_RESP or HELLO."""
     if serial is None:
         return False
     try:
@@ -803,7 +751,7 @@ def active_probe(port: str, baud: int = 921600, timeout: float = 1.5) -> bool:
                     raw = cobs_decode(wire)
                     _hdr, payload = parse_raw_packet(raw)
                     ptype = _hdr[2]
-                    if ptype in _PROBE_HIT_TYPES:
+                    if ptype in (PT_SYNC_RESP, PT_HELLO, PT_HEALTH):
                         return True
                 except Exception:
                     continue
@@ -815,18 +763,9 @@ def active_probe(port: str, baud: int = 921600, timeout: float = 1.5) -> bool:
 
 def auto_detect_port(preferred_port: Optional[str] = None,
                      baud: int = 921600,
-                     verbose: bool = True) -> Optional[str]:
-    """Resolve the BRUSH-V1 bridge port, or None when nothing answers.
-
-    Honors preferred_port; otherwise probes the ranked candidates.  A port that
-    never replies is *not* returned: guessing used to yield a "connected but no
-    data" state that was harder to diagnose than an honest empty result, and
-    also picked up ports that only ever carry debug text.
-    """
+                     verbose: bool = True) -> str:
+    """Resolve a serial port.  Honors preferred_port; falls back to keyword + probe."""
     if preferred_port:
-        if is_debug_port(preferred_port) and verbose:
-            print(f"[WARN] {preferred_port} is an Espressif native-USB debug port; "
-                  "opening it can reset the chip into ROM download mode.")
         try:
             with serial.Serial(preferred_port, baudrate=baud, timeout=0.1) as s:
                 s.close()
@@ -840,16 +779,16 @@ def auto_detect_port(preferred_port: Optional[str] = None,
 
     candidates = list_candidate_ports()
     if not candidates:
-        if verbose:
-            print("[WARN] No BRUSH-V1 candidate port found.  Visible ports:")
-            for p in (list_ports.comports() if list_ports else []):
-                print(f"   {p.device} - {p.description}")
-            print("       Need the S3 USB-UART adapter (CH343/CH340/CP210x); the "
-                  "ESP32 native-USB debug port carries no BRUSH-V1 stream.")
-        return None
+        raise RuntimeError(
+            "No candidate ports found.  Plug in the ESP32-S3 and check the "
+            "CH343 driver.  All visible ports:\n  "
+            + "\n  ".join(
+                f"{p.device} - {p.description}" for p in (list_ports.comports() if list_ports else [])
+            )
+        )
 
     if verbose:
-        print(f"[INFO] Candidate ports ({len(candidates)}):")
+        print(f"[INFO] Keyword candidates ({len(candidates)}):")
         for d, desc in candidates:
             print(f"   {d} - {desc}")
         print(f"[INFO] Active probing @ {baud} baud...")
@@ -862,10 +801,10 @@ def auto_detect_port(preferred_port: Optional[str] = None,
                 print(f"  [HIT] {device}")
             return device
 
+    fallback = candidates[0][0]
     if verbose:
-        print("[WARN] No candidate answered BRUSH-V1; not guessing a port.  Probed: "
-              + ", ".join(d for d, _ in candidates))
-    return None
+        print(f"[WARN] No PING response. Falling back to first candidate: {fallback}")
+    return fallback
 
 
 if __name__ == "__main__":
@@ -883,9 +822,6 @@ if __name__ == "__main__":
             print(f"{d}\t{desc}")
     elif args.cmd == "probe":
         port = auto_detect_port(baud=args.baud)
-        if port is None:
-            print("FAIL: no BRUSH-V1 port answered")
-            raise SystemExit(1)
         print(f"OK: {port}")
     else:
         parser.print_help()

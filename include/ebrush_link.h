@@ -49,28 +49,12 @@ struct Meta {
   uint8_t imu_whoami;
   uint8_t transport_id; // 1=BLE; 2=Wi-Fi
   uint8_t reserved;
-  // V1.1 diagnostics tail (2026-11-05): appended after the 36-byte v1.0
-  // prefix, so a v1.0 peer still parses the prefix and the receiver copies
-  // only min(payload_len, sizeof(Meta)).  Every field mirrors C3 SensorState
-  // and is relayed 1:1 into HealthPayload by the S3.
-  uint64_t i2c_scan_bitmap_lo;
-  uint64_t i2c_scan_bitmap_hi;
-  uint32_t i2c_scan_duration_us;
-  uint32_t hall_recoveries;
-  uint32_t imu_recoveries;
-  uint8_t i2c_scan_count;
-  uint8_t i2c_scan_done;
-  uint8_t hall_i2c_address;
-  uint8_t hall_init_error;
-  uint8_t hall_manufacturer_lsb;
-  uint8_t hall_manufacturer_msb;
-  uint8_t hall_device_id;
 };
 #pragma pack(pop)
 
 static_assert(sizeof(Header) == 12, "header packing");
 static_assert(sizeof(Sample) == 46, "sample packing");
-static_assert(sizeof(Meta) == 71, "meta packing (36-byte v1.0 prefix + v1.1 diag tail)");
+static_assert(sizeof(Meta) == 36, "meta packing");
 constexpr size_t MAX_PACKET = sizeof(Header) + MAX_SAMPLES * sizeof(Sample) + 2;
 static_assert(MAX_PACKET <= 244, "must fit ATT MTU 247 notification");
 

@@ -4,7 +4,7 @@
 simultaneously enabled second radio. There is no C3--S3 UART link.**
 
 ```
-TMAG5273 I2C --+
+MMC5983MA / TMAG5273 I2C --+
                 +-- ESP32-C3 (80 MHz, raw sensor packets, timestamps, no GUI)
 LSM6DSR SPI ----+               |
                             BLE Notify (default)
@@ -19,6 +19,10 @@ LSM6DSR SPI ----+               |
                                 |
                            e-Brush Studio
 ```
+
+**MMC5983MA replacement:** see `docs/MMC5983MA_ADAPTATION_CN.md` for
+correct wiring, full C3 + S3 flashing, 115200 serial diagnostic target
+`c3_mmc5983_test`, 18-to-16 bit conversion, and recalibration precautions.
 
 ## Build and flash
 
@@ -57,16 +61,19 @@ CRC-protected application bundles; target ATT MTU is 247 bytes.
 
 | Device | Pin | ESP32-C3 GPIO |
 |--------|-----|----------------|
-| Hall TMAG5273 | SDA | 4 |
-| Hall TMAG5273 | SCL | 5 |
-| IMU LSM6DSR | SPI SCK | 6 |
-| IMU LSM6DSR | SPI MOSI | 7 |
-| IMU LSM6DSR | SPI MISO | 3 |
-| IMU LSM6DSR | SPI CS | 10 |
+| MMC5983MA / TMAG5273 | SDA | 5 |
+| MMC5983MA / TMAG5273 | SCL | 6 |
+| MMC5983MA (I2C mode) | SPI_CS | tied HIGH to VDDIO/3.3V, not a C3 GPIO |
+| MMC5983MA | INT | optional; GPIO7 reserved (polling used) |
+| IMU LSM6DSR | SPI SCK | 4 |
+| IMU LSM6DSR | SPI MOSI | 3 |
+| IMU LSM6DSR | SPI MISO | 1 |
+| IMU LSM6DSR | SPI CS | 0 |
 | Both sensors | VCC, GND | regulated 3V3, GND |
 
-These pin numbers are **only for the selected C3 DevKitM-1 reference**.
-GPIO4--7 are also JTAG pins; do not attempt simultaneous external JTAG use.
+These are the actual default values from `include/node_config.h` in this release,
+not a reused older wiring diagram. Physical module labels vary: consult your
+MMC5983MA breakout schematic; its `SPI_CS` must be HIGH for I²C.
 Never copy the former ESP32-S3 pin numbers, especially GPIO12/13, onto a C3;
 GPIO12--17 are tied to flash on common C3 modules. GPIO2, 8, 9 are boot
 straps; GPIO18/19 may be used for USB. Verify the actual board pinout before
@@ -74,8 +81,9 @@ applying power. The C3 is the pen endpoint; the S3 stays off-pen.
 
 ## What runs on which board
 
-C3 (low-energy side): 80 MHz CPU, TMAG5273 I2C continuous conversion with
-4x averaging, LSM6DSR SPI 208 Hz ODR, monotonic microsecond timestamp,
+C3 (low-energy side): 80 MHz CPU, either MMC5983MA (I²C 200Hz, auto SET/RESET)
+or TMAG5273 (I²C continuous conversion with configurable 32x averaging),
+LSM6DSR SPI 208 Hz ODR, monotonic microsecond timestamp,
 sensor-age/status/retry flags, bounded 24-sample sender FIFO, up to four
 raw samples per BLE notification / UDP datagram, periodic status metadata.
 No serial debug loop, no large floating-point processing, no displays,
@@ -93,9 +101,8 @@ Existing Studio V1 readers still receive the original raw DATA protocol.
 `studio/accel_trail.py` provides translucent time-decaying trails; the
 trajectory's calibrated 2D/3D position must come from an external pose mapper
 / camera tracker, NOT integrated raw acceleration. See
-`studio/STUDIO_INTEGRATION.txt` for integration steps. **The current Studio
-v1.2 GUI source was not part of the files in this handoff**, so this package
-is an integration-ready adapter, not a verified Studio v1.2 GUI patch.
+`studio/STUDIO_INTEGRATION.txt` for integration steps. **This upload includes the Studio source**, with a model-aware decoder for
+MMC5983MA. Qt UI and real Windows hardware are not verified in this sandbox.
 
 ## Verification included / not included
 
@@ -106,8 +113,9 @@ sh tests/run_local_tests.sh
 Local tests check 1--4 sample link bundles, metadata/CRC, malformed lengths,
 32-bit tick rollover, adaptive filter validity and reset behavior, legacy
 BRUSH-V1 host decoding, 0x20/0x21 decoding, trail fade, NaNs, timestamp
-repeats and disconnect gaps. Four firmware targets are syntax checked with
-mock Arduino/NimBLE/Wi-Fi types using `g++ -Wall -Wextra -Werror`.
+repeats and disconnect gaps. C3/S3 BLE and Wi-Fi firmware paths are syntax checked with mock
+Arduino/NimBLE/Wi-Fi types using GCC; MMC 18-bit conversion, status W1C,
+protocol compatibility and Studio unit conversion have additional tests.
 
 **Not yet verified:** real PlatformIO cross-compilation, BLE pairing/MTU
 negotiation/throughput on the boards, Wi-Fi power save on the boards, or
@@ -121,7 +129,7 @@ I2C dropouts; nominal 200 Hz is a scheduling target, not a measured result.
 Power the pen via a protected Li-ion cell with a **proper regulated 3.3 V**
 rail and adequate pulse-current capability. Do not connect a full 4.2 V cell
 to the ESP32-C3 3V3 pin. Isolate RF module, battery ferromagnetic parts and
-switching regulators from TMAG5273; keep I2C leads short and mechanically
+switching regulators from the magnetometer; keep I2C leads short and mechanically
 restrained. Place a current meter / battery analyzer in the *C3* supply to
 verify averaged current (idle/streaming/failed RF), peak brownout conditions,
 Hall RMS noise, frame gaps and actual throughput. At 200 Hz the node cannot
@@ -148,12 +156,16 @@ See `docs/PROTOCOL.md`. All radio packets have application CRC16, a packet
 sequence number, sample count and C3 timestamps. S3 validates before acting
 on any data; lost samples are flagged, never silently interpolated.
 
+## Material 3 UI iteration
 
-## SAM3 6015 Studio Production Loop (2026-10)
+The desktop workspace now uses a Material 3-inspired, role-based theme adapted to PySide6:
 
-The actual Studio GUI now integrates bounded live single-frame semantic masks,
-complete-video chunked SAM3 upload, all-frame mask archives, resumable jobs,
-and Agent-readable diagnostics and artifact download.
+- Light and dark color schemes with persisted selection.
+- App bar with live brush, camera and SAM3 status chips.
+- Responsive view toolbar and selectable view chips.
+- Rounded view cards while preserving the original camera, OpenGL and calibration widgets during layout changes.
+- Theme-aware PyQtGraph plots and 3D scene overlay.
 
-See **[docs/SAM3_STUDIO_PRODUCTION.md](docs/SAM3_STUDIO_PRODUCTION.md)** for
-connection, operation, data contracts, recovery and test limitations.
+Start the app as before with `RUN_STUDIO.bat`. Use the theme control in the app bar to switch light/dark mode. The design decisions and implementation map are documented in `docs/UI_MATERIAL3_DESIGN.md`.
+
+The UI theme is implemented with Qt palette roles and QSS tokens; it does not load web components or require network access. The underlying sensor, camera, SAM3, pose-mapping and calibration pipelines remain unchanged.

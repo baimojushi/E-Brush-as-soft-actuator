@@ -60,7 +60,34 @@ def test_trail():
     buf.reset()
     check(buf.primitives(6) == [])
 
+def test_mmc5983_scaling():
+    from brush_serial import BrushSerial, HALL_LSB_PER_MT_BY_VARIANT
+    # Serializer stays 82-byte BRUSH-V1 despite new magnetometer model.
+    check(DATA.size == 82)
+    check(HALL_LSB_PER_MT_BY_VARIANT[3] == 40960.0)
+    reader = BrushSerial.__new__(BrushSerial)
+    class FakeClock:
+        synced = False
+        last_rtt_ns = float('nan')
+    reader.clock = FakeClock()
+    reader.latest_health = {'hall_variant': 3}
+    reader.latest_hello = None
+    values = [13,0,1000,999,998,0x3,0,-16384,0,16384,0,1,1,3,0,
+              100,1,2,3,200,201,202,1.,0.,0.,0.]
+    data = reader._decode_data(tuple(values), 1000000)
+    check(data['hall_variant'] == 3)
+    check(abs(data['bx_mT'] + .4) < 1e-7)
+    check(abs(data['bz_mT'] - .4) < 1e-7)
+    check(math.isnan(data['hall_temp_C']))
+    reader.latest_health = {'hall_variant': 0}
+    reader.latest_hello = {'hall_variant': 3}
+    check(reader._decode_data(tuple(values), 1000000)['hall_variant'] == 3)
+    reader.latest_health = {'hall_variant': 1}
+    reader.latest_hello = None
+    check(abs(reader._decode_data(tuple(values), 1000000)['bx_mT'] - (-16384/820)) < 1e-7)
+
 if __name__ == "__main__":
     test_bridge_structs()
     test_trail()
+    test_mmc5983_scaling()
     print("OK: host V1 compatibility, extension adapter, smooth/fade trail boundaries")

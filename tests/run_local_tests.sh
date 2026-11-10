@@ -11,4 +11,8 @@ c++ -std=c++17 -Wall -Wextra -Werror -Itests/mock_wire \
     -Itests/native_stubs -Ilib/tmag5273 \
     tests/test_hall_fresh.cpp lib/tmag5273/tmag5273.cpp -o "$BIN"
 "$BIN"
+c++ -std=c++17 -Wall -Wextra -Werror -Iinclude -Itests/mock_mmc_wire \
+    -Itests/native_stubs -Ilib/mmc5983ma \
+    tests/test_mmc5983ma.cpp lib/mmc5983ma/mmc5983ma.cpp -o "$BIN"
+"$BIN"
 python3 tests/test_python.py

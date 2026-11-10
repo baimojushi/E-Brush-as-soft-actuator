@@ -17,10 +17,10 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         super().__init__()
         layout = QtWidgets.QVBoxLayout(self)
         self.title = QtWidgets.QLabel("姿态映射校准 · UP0 / UP_R0")
-        self.title.setStyleSheet("font-size:19px;font-weight:600")
+        self.title.setObjectName("sectionHeading")
         self.title.setWordWrap(True)
         self.stage = QtWidgets.QLabel("IDLE")
-        self.stage.setStyleSheet("font-size:22px;font-weight:700")
+        self.stage.setObjectName("panelHeadline")
         self.stage.setWordWrap(True)
         self.msg = QtWidgets.QLabel("准备就绪")
         self.msg.setWordWrap(True)
@@ -31,7 +31,7 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
             "注意：六轴 IMU 只能验证是否竖直及静止，不能自行识别 R0 的绝对方向。"
         )
         self.definition.setWordWrap(True)
-        self.definition.setStyleSheet("padding:8px; border:1px solid #777; border-radius:4px;")
+        self.definition.setObjectName("definitionCard")
 
         self.progress = QtWidgets.QProgressBar()
         self.progress.setRange(0, 100)

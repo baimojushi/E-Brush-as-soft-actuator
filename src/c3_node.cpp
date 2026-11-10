@@ -263,17 +263,15 @@ bool initHall(bool recover_bus = true) {
 
   bool any_candidate_ack = false;
   for (size_t i = 0; i < HALL_ADDR_COUNT; ++i) {
-    any_candidate_ack |= (state.i2c_scan_bitmap_lo & (1ULL << HALL_ADDRS[i])) ||
-                         (state.i2c_scan_bitmap_hi & (1ULL << (HALL_ADDRS[i] - 0x40)));
+    any_candidate_ack |= i2cAddressSeen(HALL_ADDRS[i]);
   }
 
-  // 第一遍优先尝试启动扫描中实际 ACK 的 TMAG 工厂地址;
-  // 第二遍再尝试其余候选, 覆盖"扫描瞬间设备尚未就绪"的情况。
+  // First try ACKed addresses, then retry unseen candidates once for
+  // sensors that finished powering up after the one-time bus scan.
   for (uint8_t pass = 0; pass < 2; ++pass) {
     for (size_t i = 0; i < HALL_ADDR_COUNT; ++i) {
       const uint8_t addr = HALL_ADDRS[i];
-      const bool seen = (state.i2c_scan_bitmap_lo & (1ULL << addr)) ||
-                        (state.i2c_scan_bitmap_hi & (1ULL << (addr - 0x40)));
+      const bool seen = i2cAddressSeen(addr);
       if ((pass == 0 && !seen) || (pass == 1 && seen)) continue;
       if (tryHallAddress(addr)) return true;
     }
@@ -364,7 +362,9 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
         !(state.h.x_raw == 0 && state.h.y_raw == 0 && state.h.z_raw == 0);
     if (ageUs(hall_check_after_us, state.hall_last) <= MAX_STALE_US && hall_value_plausible) {
       out.status |= BrushProtocol::STATUS_HALL_VALID;
-      if (state.h.conv_status & 0x02) out.status |= BrushProtocol::STATUS_HALL_DIAG;
+      // MMC STATUS bit 1 means temperature ready, not a diagnostic alert.
+      if (!state.hall_is_mmc && (state.h.conv_status & 0x02))
+        out.status |= BrushProtocol::STATUS_HALL_DIAG;
       if (abs(state.h.x_raw) > 31000 || abs(state.h.y_raw) > 31000 ||
           abs(state.h.z_raw) > 31000) out.status |= BrushProtocol::STATUS_HALL_NEAR_SAT;
     } else if (ageUs(hall_check_after_us, state.hall_last) > MAX_STALE_US) {
@@ -421,7 +421,6 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
   const uint32_t stamp_now = static_cast<uint32_t>(esp_timer_get_time());
   out.hall_age_us = age16(stamp_now, state.hall_last);
   out.imu_age_us = age16(stamp_now, state.imu_last);
-
   out.hx = state.h.x_raw;
   out.hy = state.h.y_raw;
   out.hz = state.h.z_raw;
@@ -612,26 +611,13 @@ void maybeSend(uint32_t now) {
     meta.last_sensor_time_us32 = state.last_sample_tick;
     meta.hall_variant = state.hall_variant;
     meta.imu_whoami = imu.whoAmI();
+    // ★ V1.1 扩展诊断字段 (兼容旧版 Meta 结构, 新字段追加在后, S3 端可选解析)
+    // 这里复用 reserved 字段传递部分诊断信息
 #ifdef BRUSH_LINK_BLE
     meta.transport_id = 1;
 #else
     meta.transport_id = 2;
 #endif
-    // V1.1 diagnostics tail: the S3 relays these 1:1 into HealthPayload so
-    // the host can see the bus scan result and the Hall identity without a
-    // serial console on the C3.
-    meta.i2c_scan_bitmap_lo = state.i2c_scan_bitmap_lo;
-    meta.i2c_scan_bitmap_hi = state.i2c_scan_bitmap_hi;
-    meta.i2c_scan_duration_us = state.i2c_scan_duration_us;
-    meta.hall_recoveries = state.hall_recoveries;
-    meta.imu_recoveries = state.imu_recoveries;
-    meta.i2c_scan_count = state.i2c_scan_count;
-    meta.i2c_scan_done = state.i2c_scan_done;
-    meta.hall_i2c_address = state.hall_i2c_address;
-    meta.hall_init_error = state.hall_init_error;
-    meta.hall_manufacturer_lsb = state.hall_manufacturer_lsb;
-    meta.hall_manufacturer_msb = state.hall_manufacturer_msb;
-    meta.hall_device_id = state.hall_device_id;
     const size_t size = make_packet(TYPE_META, state.packet_seq++, &meta,
       sizeof(meta), 1, wire, sizeof(wire));
     const bool sent = size && transportSend(wire, size);

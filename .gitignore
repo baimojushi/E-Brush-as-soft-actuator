@@ -33,14 +33,10 @@ Thumbs.db
 # Temporary
 tmp/
 temp/
-*.tmp
+*.tmp__pycache__/  
+  
 __pycache__/
 *.pyc
-# Generated SAM3 artifacts (per-frame masks / video job output)
-runtime/sam3_production/
-runtime/sam3_video_jobs/
 
-# Generated runtime state (live snapshot + event log; calibration kept in
-# runtime/last_up0_reference.json, which IS tracked)
-runtime/state.json
-runtime/events.jsonl
+# e-Brush runtime state — untracked per project decision
+runtime/

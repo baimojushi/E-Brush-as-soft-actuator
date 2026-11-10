@@ -119,6 +119,7 @@ class HallExtrinsicCalibration:
         self.pending_t0=None
         self.last_frame_id=None
         self.last_calibration_id=None
+        self.hall_variant=0
         self.last_capture_note=""
         self.train=[]
         self.validation=[]
@@ -165,6 +166,7 @@ class HallExtrinsicCalibration:
             self.mapping_fingerprint=self._mapping_info()
             self.reference_frame=pose.get("frame_id")
             self.last_calibration_id=brush.get("calibration_id")
+            self.hall_variant=int(brush.get("hall_variant",0) or 0)
             return self.state()
 
     def cancel(self):
@@ -213,6 +215,11 @@ class HallExtrinsicCalibration:
                     if fid==self.last_frame_id:
                         return self.state()
                 self.last_frame_id=fid
+            # Reject a sensor model swap during a calibration session.
+            current_variant=int(brush.get("hall_variant",0) or 0)
+            if self.hall_variant and current_variant and current_variant!=self.hall_variant:
+                self._invalidate("Hall 型号在标定过程中发生变化")
+                return self.state()
             cal_id=brush.get("calibration_id")
             if self.last_calibration_id is not None and cal_id is not None:
                 if int(cal_id)!=int(self.last_calibration_id):
@@ -449,14 +456,15 @@ class HallExtrinsicCalibration:
             profile={
                 "schema":"ebrush.hall_extrinsic_profile.v1",
                 "name":name,"created_unix":time.time(),"parent":self._active_name(),
-                "sensor":"TMAG5273",
+                "sensor":("MMC5983MA" if self.hall_variant == 3 else "TMAG5273"),
+                "hall_variant":self.hall_variant,
                 "R_brush_from_hall":self.candidate["R_brush_from_hall"],
                 "R_imu_from_hall":self.candidate["R_imu_from_hall"],
                 "frame_conventions":{
                     "R_brush_from_hall":"Hall vector coordinates -> current mapped Brush frame",
                     "R_imu_from_hall":"Hall vector coordinates -> physical IMU sensor axes",
                     "brush_positive_z":"tip-to-tail",
-                    "hall_components":"TMAG5273 X/Y/Z in mT",
+                    "hall_components":"Magnetometer X/Y/Z in mT (model-specific native axes)",
                 },
                 "solution":self.candidate,"validation":self.validation_report,
                 "pose_mapping_reference":self.mapping_fingerprint,

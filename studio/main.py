@@ -32,9 +32,7 @@ def _load_saved_reference(root):
 from sources import HP60CSource,BrushSource
 from pose_mapper import PoseMapper
 from core import HotPatch
-from sam3_client import SAM3Client, composite_overlay
-from sam3_video_jobs import VideoJobManager
-from sam3_production_panel import SAM3ProductionPanel
+from sam3_client import SAM3Client
 from vision_pose import VisionPoseEstimator,compare_axes
 from agent_control import AgentControl
 from mapper_debug import MapperDebug
@@ -46,6 +44,7 @@ from hall_panel import HallPanel
 from hall_extrinsic import HallExtrinsicCalibration
 from hall_extrinsic_ui import HallExtrinsicPanel
 from responsive_workspace import ResponsiveWorkspace
+from material_theme import apply_material_theme, tokens as material_tokens
 from PySide6 import QtCore,QtWidgets,QtGui
 import pyqtgraph as pg
 
@@ -159,7 +158,7 @@ def overlay(rgb,mask=None,axis_text=None):
 class ValidationPanel(QtWidgets.QWidget):
     def __init__(self):
         super().__init__();L=QtWidgets.QVBoxLayout(self)
-        self.big=QtWidgets.QLabel("SAM3 waiting…");self.big.setStyleSheet("font-size:19px;font-weight:700")
+        self.big=QtWidgets.QLabel("SAM3 waiting…");self.big.setObjectName("panelHeadline")
         self.big.setWordWrap(True)
         self.big.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         L.addWidget(self.big)
@@ -184,7 +183,7 @@ class ColormapControlPanel(QtWidgets.QWidget):
 
         # Title
         title = QtWidgets.QLabel("深度图色彩控制")
-        title.setStyleSheet("font-size:14px;font-weight:700;color:#e5e7eb;")
+        title.setObjectName("sectionHeading")
         L.addWidget(title)
 
         # Colormap type
@@ -282,6 +281,9 @@ class Win(QtWidgets.QMainWindow):
     def __init__(self, a):
         super().__init__()
         self._settings = QtCore.QSettings("E-Brush", "Studio")
+        self._theme_mode = str(self._settings.value("ui/theme", "light")).lower()
+        if self._theme_mode not in ("light", "dark"):
+            self._theme_mode = "light"
         screen = QtWidgets.QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
@@ -290,7 +292,7 @@ class Win(QtWidgets.QMainWindow):
         else:
             self.resize(1450, 850)
         self.setMinimumSize(720, 520)
-        self.setWindowTitle("e-Brush Studio v1.0 — 彩色/深度/SAM3/验证/三维/霍尔/姿态/外参")
+        self.setWindowTitle("E-Brush Studio | Material 3 Workspace")
 
         cfg = json.loads((ROOT/"config"/"vision_validation.json").read_text(encoding="utf-8"))
         self.cfg = cfg
@@ -329,10 +331,7 @@ class Win(QtWidgets.QMainWindow):
             a.sam3_prompt or sc["prompt"],
             sc["jpeg_quality"], sc["timeout_s"],
             sc.get("clip_frames", 30), sc.get("clip_fps", 30),
-            sc.get("min_interval_s", 1.0),
-            runtime_dir=ROOT / "runtime" / "sam3_production",
-            max_frame_pixels=sc.get("max_frame_pixels", 307200),
-            min_score=sc.get("min_score", 0.0),
+            sc["min_interval_s"]
         )
 
         # Vision
@@ -343,20 +342,10 @@ class Win(QtWidgets.QMainWindow):
 
         self.last_submitted = -1
         self.last_sam_result = -1
-        self.last_sam_sequence = 0
-        self._video_preview_active = False
         self.last_validation = None
 
         # Agent
         self.agent = AgentControl(ROOT/"runtime", a.agent_host, a.agent_port)
-        self.sam.set_event_sink(self.agent.event)
-        self.video_jobs = VideoJobManager(
-            ROOT / "runtime", self.sam.transport,
-            chunk_frames=sc.get("video_chunk_frames", 50),
-            max_frame_pixels=sc.get("max_frame_pixels", 307200),
-            event_sink=self.agent.event,
-        )
-        self.agent.register_artifact_provider(self.video_jobs)
         self._register_agent_commands()
         self.agent.start()
         self._last_agent_flush = 0
@@ -376,6 +365,9 @@ class Win(QtWidgets.QMainWindow):
         self.hallui = HallPanel()
         self.calui = PoseCalibrationPanel()
         self.hallcalui = HallExtrinsicPanel()
+        self._apply_plot_theme()
+        if hasattr(self.scene3d, "set_theme"):
+            self.scene3d.set_theme(self._theme_mode)
 
         self._views = [
             ("彩色图像", self.rgb),
@@ -388,27 +380,36 @@ class Win(QtWidgets.QMainWindow):
             ("霍尔外参标定", self.hallcalui),
         ]
         central = QtWidgets.QWidget()
+        central.setObjectName("appCentral")
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(10, 9, 10, 8)
+        main_layout.setSpacing(10)
 
-        # A width-aware workspace replaces the old fixed three-column grid.
-        # Persistent views keep their camera, OpenGL and calibration state.
+        # Material 3 app bar: identity, live device states and theme control.
+        main_layout.addWidget(self._build_app_bar())
+
+        # Persistent camera/OpenGL/calibration views are reflowed, never recreated.
         self.workspace = ResponsiveWorkspace(self._views)
         self.workspace.sidebarToggleRequested.connect(self._toggle_sidebars)
         self.workspace.resetLayoutRequested.connect(self._reset_ui_layout)
         main_layout.addWidget(self.workspace, 1)
+        self._apply_plot_theme()
+        self.statusBar().showMessage("\u672c\u5730\u5de5\u4f5c\u53f0  \u00b7  \u91c7\u96c6\u3001\u6807\u5b9a\u4e0e\u5206\u6790\u6570\u636e\u4fdd\u5b58\u5728\u672c\u5730")
+        agent_status = QtWidgets.QLabel(f"Agent  {self.agent.host}:{self.agent.port}")
+        agent_status.setObjectName("mutedLabel")
+        self.statusBar().addPermanentWidget(agent_status)
 
         # ---- Docks ----
         # Right dock: Runtime + Colormap
-        d = QtWidgets.QDockWidget("Runtime / 色彩控制", self)
+        d = QtWidgets.QDockWidget("\u8bbe\u5907\u4e0e\u89c6\u89c9", self)
         d.setObjectName("dock_runtime_colormap")
         d.setMinimumWidth(245)
         self._runtime_dock = d
         w = QtWidgets.QWidget()
         f = QtWidgets.QVBoxLayout(w)
-        f.setSpacing(8)
+        f.setContentsMargins(12, 12, 12, 12)
+        f.setSpacing(10)
 
         # Runtime status
         self.prompt = QtWidgets.QLineEdit(self.sam.prompt)
@@ -422,35 +423,37 @@ class Win(QtWidgets.QMainWindow):
         self.status.setReadOnly(True)
         self.status.setMaximumHeight(200)
 
-        b = QtWidgets.QPushButton("重新开始 UP0 校准")
+        b = QtWidgets.QPushButton("\u91cd\u65b0\u5f00\u59cb UP0 \u6821\u51c6")
+        b.setProperty("primary", "true")
         b.clicked.connect(lambda: self._cal_ui_call(self.pose_cal.start))
-        h = QtWidgets.QPushButton("检查 SAM3")
+        h = QtWidgets.QPushButton("\u68c0\u67e5 SAM3 ")
         h.clicked.connect(self.check_health)
 
-        f.addWidget(QtWidgets.QLabel("SAM3 Prompt")); f.addWidget(self.prompt)
-        f.addWidget(QtWidgets.QLabel("Clip Frames")); f.addWidget(self.clip_frames)
-        f.addWidget(QtWidgets.QLabel("Clip FPS")); f.addWidget(self.clip_fps)
+        f.addWidget(QtWidgets.QLabel("SAM3 \u63d0\u793a\u8bcd")); f.addWidget(self.prompt)
+        f.addWidget(QtWidgets.QLabel("\u7247\u6bb5\u5e27\u6570")); f.addWidget(self.clip_frames)
+        f.addWidget(QtWidgets.QLabel("\u7247\u6bb5\u5e27\u7387")); f.addWidget(self.clip_fps)
         f.addWidget(h); f.addWidget(b); f.addWidget(self.status)
 
         # Colormap control panel
         self.colormap_panel = ColormapControlPanel(self._on_colormap_change)
-        f.addWidget(QtWidgets.QLabel("—— 深度图色彩映射 ——"))
+        f.addWidget(QtWidgets.QLabel("\u6df1\u5ea6\u56fe\u8272\u5f69\u6620\u5c04"))
         f.addWidget(self.colormap_panel)
 
         # Brush serial reconnection panel
         self.brush_panel = QtWidgets.QGroupBox("毛笔串口重连")
-        self.brush_panel.setStyleSheet("font-weight:600; font-size:12px;")
+        self.brush_panel.setObjectName("brushPanel")
         bl = QtWidgets.QVBoxLayout(self.brush_panel)
         bl.setContentsMargins(8, 8, 8, 8)
         bl.setSpacing(6)
 
         self.brush_status_lbl = QtWidgets.QLabel("状态: 检测中...")
-        self.brush_status_lbl.setStyleSheet("font-size:12px;")
+        self.brush_status_lbl.setObjectName("statusText")
+        self.brush_status_lbl.setProperty("state", "warning")
         self.brush_status_lbl.setWordWrap(True)
         bl.addWidget(self.brush_status_lbl)
 
         self.brush_port_lbl = QtWidgets.QLabel("端口: 未连接")
-        self.brush_port_lbl.setStyleSheet("font-size:12px; color:#888;")
+        self.brush_port_lbl.setObjectName("mutedLabel")
         self.brush_port_lbl.setWordWrap(True)
         bl.addWidget(self.brush_port_lbl)
 
@@ -459,7 +462,7 @@ class Win(QtWidgets.QMainWindow):
         self.brush_imu_lbl = QtWidgets.QLabel("IMU: 等待有效 DATA")
         for label in (self.brush_hall_lbl, self.brush_imu_lbl):
             label.setWordWrap(True)
-            label.setStyleSheet("font-size:11px; color:#bbb;")
+            label.setObjectName("mutedLabel")
             bl.addWidget(label)
 
         row = QtWidgets.QWidget()
@@ -467,7 +470,8 @@ class Win(QtWidgets.QMainWindow):
         rh.setContentsMargins(0, 0, 0, 0)
         self.btn_brush_reconnect = QtWidgets.QPushButton("手动重连")
         self.btn_brush_reconnect.clicked.connect(self._manual_brush_reconnect)
-        self.btn_brush_reconnect.setMinimumHeight(28)
+        self.btn_brush_reconnect.setMinimumHeight(32)
+        self.btn_brush_reconnect.setProperty("primary", "true")
         self.chk_auto_reconnect = QtWidgets.QCheckBox("自动重连")
         self.chk_auto_reconnect.setChecked(True)
         self.chk_auto_reconnect.toggled.connect(self._toggle_auto_reconnect)
@@ -488,14 +492,14 @@ class Win(QtWidgets.QMainWindow):
         # Left dock: a compact, scrollable mapping editor. The previous
         # QFormLayout placed three large spinboxes beside a long label and
         # forced this dock to steal half of the central viewport.
-        md = QtWidgets.QDockWidget("映射快捷调试", self)
+        md = QtWidgets.QDockWidget("\u5750\u6807\u6620\u5c04\u8c03\u8bd5", self)
         md.setObjectName("dock_mapper_debug")
         md.setMinimumWidth(245)
         self._mapper_dock = md
         mw = QtWidgets.QWidget()
         mf = QtWidgets.QVBoxLayout(mw)
-        mf.setContentsMargins(8, 8, 8, 8)
-        mf.setSpacing(8)
+        mf.setContentsMargins(12, 12, 12, 12)
+        mf.setSpacing(10)
         self.map_spins = []
         for group, label in (("board", "纸面坐标 XYZ °"), ("brush", "毛笔/安装 XYZ °")):
             group_box = QtWidgets.QGroupBox(label)
@@ -541,22 +545,8 @@ class Win(QtWidgets.QMainWindow):
         mapper_scroll.setWidget(mw)
         md.setWidget(mapper_scroll)
         self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, md)
-
-        # One full-video job manager is shared by the UI and the Agent API.
-        # Upload/download/ZIP work never runs on the Qt event loop.
-        vd = QtWidgets.QDockWidget("SAM3 视频上传 / 完整掩码", self)
-        vd.setObjectName("dock_sam3_production")
-        self._video_dock = vd
-        self.video_panel = SAM3ProductionPanel(
-            self.video_jobs, self.sam,
-            self._show_video_preview, self._return_live_overlay)
-        vd.setWidget(self.video_panel)
-        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, vd)
-        self.tabifyDockWidget(d, vd)
-        d.raise_()
         d.visibilityChanged.connect(self._sync_sidebars_button)
         md.visibilityChanged.connect(self._sync_sidebars_button)
-        vd.visibilityChanged.connect(self._sync_sidebars_button)
 
         # Calibration panels connections
         self.calui.startRequested.connect(lambda: self._cal_ui_call(self.pose_cal.start))
@@ -595,20 +585,124 @@ class Win(QtWidgets.QMainWindow):
         self.t = QtCore.QTimer()
         self.t.timeout.connect(self.tick)
         self.t.start(16)
+        self._update_topbar_status()
+
+    # ---- Material 3 application shell ----
+    @staticmethod
+    def _make_status_chip(text, state="neutral"):
+        label = QtWidgets.QLabel(text)
+        label.setProperty("role", "statusChip")
+        label.setProperty("state", state)
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        return label
+
+    def _build_app_bar(self):
+        bar = QtWidgets.QFrame()
+        bar.setObjectName("appBar")
+        bar.setFixedHeight(72)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(14, 9, 14, 9)
+        layout.setSpacing(10)
+
+        brand = QtWidgets.QLabel("EB")
+        brand.setObjectName("brandMark")
+        layout.addWidget(brand)
+
+        identity = QtWidgets.QVBoxLayout()
+        identity.setContentsMargins(0, 0, 0, 0)
+        identity.setSpacing(1)
+        title = QtWidgets.QLabel("E-Brush Studio")
+        title.setObjectName("appTitle")
+        subtitle = QtWidgets.QLabel("\u5b9e\u65f6\u611f\u77e5  \u00b7  \u59ff\u6001\u878d\u5408  \u00b7  \u89c6\u89c9\u6807\u5b9a")
+        subtitle.setObjectName("appSubtitle")
+        identity.addWidget(title)
+        identity.addWidget(subtitle)
+        layout.addLayout(identity)
+        layout.addStretch(1)
+
+        self._topbar_brush = self._make_status_chip("\u7b14\u7aef  \u00b7  \u521d\u59cb\u5316", "neutral")
+        self._topbar_camera = self._make_status_chip("\u76f8\u673a  \u00b7  \u521d\u59cb\u5316", "neutral")
+        self._topbar_sam = self._make_status_chip("SAM3  \u00b7  \u5f85\u673a", "neutral")
+        for chip in (self._topbar_brush, self._topbar_camera, self._topbar_sam):
+            layout.addWidget(chip)
+
+        self._theme_button = QtWidgets.QPushButton()
+        self._theme_button.setProperty("role", "iconButton")
+        self._theme_button.setText("\u6df1\u8272" if self._theme_mode == "light" else "\u6d45\u8272")
+        self._theme_button.setToolTip("\u5207\u6362 Material 3 \u6d45\u8272 / \u6df1\u8272\u4e3b\u9898")
+        self._theme_button.clicked.connect(self._toggle_theme)
+        layout.addWidget(self._theme_button)
+        return bar
+
+    @staticmethod
+    def _set_chip(chip, text, state):
+        if chip.text() == text and chip.property("state") == state:
+            return
+        chip.setText(text)
+        chip.setProperty("state", state)
+        chip.style().unpolish(chip)
+        chip.style().polish(chip)
+
+    def _update_topbar_status(self):
+        brush = self.br.status()
+        if brush.get("streaming_data"):
+            self._set_chip(self._topbar_brush, "\u7b14\u7aef  \u00b7  \u6570\u636e\u6b63\u5e38", "success")
+        elif brush.get("connected"):
+            self._set_chip(self._topbar_brush, "\u7b14\u7aef  \u00b7  \u5df2\u8fde\u63a5", "warning")
+        else:
+            self._set_chip(self._topbar_brush, "\u7b14\u7aef  \u00b7  \u672a\u8fde\u63a5", "error")
+
+        camera = self.hp.status()
+        if self.state.get("camera") is not None:
+            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u5b9e\u65f6\u5e27\u6b63\u5e38", "success")
+        elif camera.get("state") == "DISABLED":
+            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u5df2\u5173\u95ed", "neutral")
+        elif camera.get("attached"):
+            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u5df2\u8fde\u63a5", "warning")
+        else:
+            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u7b49\u5f85\u8fde\u63a5", "warning")
+
+        result = self.sam.latest()
+        if result is None:
+            self._set_chip(self._topbar_sam, "SAM3  \u00b7  \u7b49\u5f85\u5e27", "neutral")
+        elif getattr(result, "error", None):
+            self._set_chip(self._topbar_sam, "SAM3  \u00b7  \u9700\u8981\u68c0\u67e5", "warning")
+        else:
+            self._set_chip(self._topbar_sam, "SAM3  \u00b7  \u5df2\u8fd4\u56de\u7ed3\u679c", "success")
+
+    def _toggle_theme(self):
+        self._theme_mode = "dark" if self._theme_mode == "light" else "light"
+        self._settings.setValue("ui/theme", self._theme_mode)
+        app = QtWidgets.QApplication.instance()
+        colors = apply_material_theme(app, self._theme_mode)
+        self._theme_button.setText("\u6df1\u8272" if self._theme_mode == "light" else "\u6d45\u8272")
+        self._apply_plot_theme(colors)
+        if hasattr(self.scene3d, "set_theme"):
+            self.scene3d.set_theme(self._theme_mode)
+
+    def _apply_plot_theme(self, colors=None):
+        c = colors or material_tokens(self._theme_mode)
+        pg.setConfigOption("background", c["plot_background"])
+        pg.setConfigOption("foreground", c["on_surface_variant"])
+        for plot in self.findChildren(pg.PlotWidget):
+            plot.setBackground(c["plot_background"])
+            for axis_name in ("left", "bottom", "right", "top"):
+                axis = plot.getAxis(axis_name)
+                axis.setPen(c["outline_variant"])
+                axis.setTextPen(c["on_surface_variant"])
+            plot.getPlotItem().showGrid(x=True, y=True, alpha=0.12)
 
     # ---- Responsive workspace & side docks ----
     def _toggle_sidebars(self):
-        show = not (self._runtime_dock.isVisible() or self._mapper_dock.isVisible()
-                    or self._video_dock.isVisible())
-        for dock in (self._runtime_dock, self._mapper_dock, self._video_dock):
-            dock.setVisible(show)
+        show = not (self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
+        self._runtime_dock.setVisible(show)
+        self._mapper_dock.setVisible(show)
         self._sync_sidebars_button()
 
     def _sync_sidebars_button(self, *_args):
         if hasattr(self, "workspace"):
             self.workspace.set_sidebar_visible(
-                self._runtime_dock.isVisible() or self._mapper_dock.isVisible()
-                or self._video_dock.isVisible())
+                self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
 
     def _reset_ui_layout(self):
         # Recover from a geometry/dock state saved on another monitor or DPI.
@@ -616,8 +710,7 @@ class Win(QtWidgets.QMainWindow):
         self._settings.remove("ui/docks")
         self.workspace.set_layout_mode("auto")
         for dock, area in ((self._mapper_dock, QtCore.Qt.LeftDockWidgetArea),
-                           (self._runtime_dock, QtCore.Qt.RightDockWidgetArea),
-                           (self._video_dock, QtCore.Qt.RightDockWidgetArea)):
+                           (self._runtime_dock, QtCore.Qt.RightDockWidgetArea)):
             dock.setFloating(False)
             self.addDockWidget(area, dock)
             dock.show()
@@ -643,15 +736,18 @@ class Win(QtWidgets.QMainWindow):
         flowing = s.get('streaming_data', False)
         if flowing:
             self.brush_status_lbl.setText(
-                f"状态: 已收到合法 DATA ✓ ({s.get('valid_data_frames', 0)} 帧)")
-            color = '#0a0'
+                f"\u72b6\u6001: \u5df2\u6536\u5230\u5408\u6cd5 DATA  \u00b7  {s.get('valid_data_frames', 0)} \u5e27")
+            state = "success"
         elif connected:
-            self.brush_status_lbl.setText('状态: 串口已打开，但尚无有效 DATA ⚠')
-            color = '#bb8100'
+            self.brush_status_lbl.setText("\u72b6\u6001: \u4e32\u53e3\u5df2\u6253\u5f00\uff0c\u7b49\u5f85\u6709\u6548 DATA")
+            state = "warning"
         else:
-            self.brush_status_lbl.setText('状态: 未连接 ✗')
-            color = '#c00'
-        self.brush_status_lbl.setStyleSheet(f'font-size:12px; color:{color};')
+            self.brush_status_lbl.setText("\u72b6\u6001: \u672a\u8fde\u63a5")
+            state = "error"
+        if self.brush_status_lbl.property("state") != state:
+            self.brush_status_lbl.setProperty("state", state)
+            self.brush_status_lbl.style().unpolish(self.brush_status_lbl)
+            self.brush_status_lbl.style().polish(self.brush_status_lbl)
         self.brush_port_lbl.setText(f"端口: {s.get('port') or '未检测到'} | {s.get('decoder')}")
         self.brush_port_lbl.setToolTip(
             f"错误: {s.get('error') or 'none'}\n统计: {s.get('parser_stats', {})}")
@@ -697,43 +793,15 @@ class Win(QtWidgets.QMainWindow):
             else:
                 self.br._stop_reconnect = True
 
-    # ---- Full-video results / Studio overlay ----
-    def _show_video_preview(self, rgb):
-        self._video_preview_active = True
-        self.maskview.set(rgb)
-
-    def _return_live_overlay(self):
-        self._video_preview_active = False
-        result = self.sam.latest()
-        if result and result.camera_context:
-            rgb = result.camera_context.get("rgb")
-            if rgb is not None:
-                self.maskview.set(composite_overlay(
-                    rgb, result.masks,
-                    f"SAM3 keyframe {result.frame_id} / {result.frame_status}"))
-
     # ---- Agent commands ----
     def _register_agent_commands(self):
         self.agent.register_command("reset_reference", lambda x: (self.pose.disarm_reference() or {"ok": True, "state": "WAITING_FOR_UP0_CONFIRMATION"}), "撤销参考；须重新确认 UP0")
         self.agent.register_command("calibration.confirm_up0", lambda a: self.pose_cal.confirm_up0(), "人工确认 R0 朝 +X 并开始采样")
-        self.agent.register_command("sam3_health", lambda x: self.sam.health(), "SAM3 /health/ready")
-        self.agent.register_command("sam3.capabilities", lambda a: self.sam.transport.capabilities(), "Query the actual SAM3 server mode/capability contract")
-        self.agent.register_command("sam3.live.status", lambda x: self.sam.status(), "SAM3 live keyframe queue/latency/failure counters")
-        self.agent.register_command("sam3.live.enable", lambda a: self.sam.set_enabled(bool(a.get("enabled", True))), "Enable or pause SAM3 live admission")
-        self.agent.register_command("sam3.live.clear_error", lambda a: self.sam.reset_error(), "Acknowledge live error without touching model state")
-        self.agent.register_command("sam3.video.submit", lambda a: self.video_jobs.enqueue(
-            a["path"], a.get("prompt", self.sam.prompt), a.get("frame_manifest_path")),
-            "Queue a complete video, optional frame_manifest_path for camera identity")
-        self.agent.register_command("sam3.video.retry", lambda a: self.video_jobs.retry(a["job_id"]), "Resume a failed/interrupted video job using saved chunks")
-        self.agent.register_command("sam3.video.status", lambda a: self.video_jobs.status(a.get("job_id")), "Video queue and detailed progress")
-        self.agent.register_command("sam3.video.jobs", lambda a: self.video_jobs.jobs(), "List completed/running/failed video jobs")
-        self.agent.register_command("sam3.video.pause", lambda a: self.video_jobs.pause(), "Pause video uploads after current chunk")
-        self.agent.register_command("sam3.video.resume", lambda a: self.video_jobs.resume(), "Resume video upload queue")
+        self.agent.register_command("sam3_health", lambda x: self.sam.health(), "SAM3 /health")
         self.agent.register_command("camera.reconnect", lambda a: self.hp.reconnect_now(), "立即重连相机")
         self.agent.register_parameter("sam3.prompt", lambda: self.sam.prompt, lambda v: (setattr(self.sam, "prompt", str(v)) or self.sam.prompt), "SAM3 text prompt", "string")
         self.agent.register_parameter("sam3.clip_frames", lambda: self.sam.clip_frames, lambda v: (setattr(self.sam, "clip_frames", int(v)) or self.sam.clip_frames), "SAM3 clip frames", "int")
         self.agent.register_parameter("sam3.clip_fps", lambda: self.sam.clip_fps, lambda v: (setattr(self.sam, "clip_fps", int(v)) or self.sam.clip_fps), "SAM3 clip FPS", "int")
-        self.agent.register_parameter("sam3.min_score", lambda: self.sam.min_score, lambda v: (setattr(self.sam, "min_score", max(0.0, min(1.0, float(v)))) or self.sam.min_score), "SAM3 min confidence score", "float")
         self.agent.register_parameter("vision.ransac_threshold_mm", lambda: self.vest.ransac_mm, lambda v: (setattr(self.vest, "ransac_mm", float(v)) or self.vest.ransac_mm), "RANSAC threshold", "float")
         self.agent.register_parameter("vision.erode_px", lambda: self.vest.erode_px, lambda v: (setattr(self.vest, "erode_px", int(v)) or self.vest.erode_px), "Mask erosion", "int")
         for i, n in enumerate(("x", "y", "z")):
@@ -761,8 +829,9 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- Tick loop ----
     def tick(self):
-        # Update brush serial status in UI
+        # Update compact Material status chips before refreshing live views.
         self._update_brush_status()
+        self._update_topbar_status()
 
         # A dead camera must not leave the last frame on screen as if live.
         self.state["camera"] = self.hp.poll()
@@ -820,8 +889,7 @@ class Win(QtWidgets.QMainWindow):
                 self.last_submitted = fid
 
         sr = self.sam.latest()
-        if sr is not None and sr.sequence != self.last_sam_sequence:
-            self.last_sam_sequence = sr.sequence
+        if sr is not None and sr.frame_id != self.last_sam_result:
             self.last_sam_result = sr.frame_id
             if sr.mask is not None:
                 vp = self.vest.estimate(sr.mask, sr.camera_context)
@@ -839,17 +907,10 @@ class Win(QtWidgets.QMainWindow):
                 self.last_validation = d
                 self.val.update_result(d)
                 txt = "axis cam " + np.array2string(vp["axis_camera"], precision=3) if vp and vp.get("ok") else "vision fit failed"
-                if not self._video_preview_active:
-                    self.maskview.set(composite_overlay(
-                        sr.camera_context.get("rgb"), sr.masks,
-                        f"frame {sr.frame_id} | {len(sr.masks)} object(s)"))
+                self.maskview.set(overlay(sr.camera_context.get("rgb"), sr.mask, txt))
             else:
                 self.last_validation = {"sam_frame_id": sr.frame_id, "sam_error": sr.error, "sam_latency_ms": sr.latency_ms}
                 self.val.update_result(self.last_validation)
-                if not self._video_preview_active and sr.camera_context:
-                    self.maskview.set(composite_overlay(
-                        sr.camera_context.get("rgb"), sr.masks,
-                        f"frame {sr.frame_id} | {sr.frame_status}"))
 
         # Visual patch with colormap
         o = self.patch.run(self.state, {
@@ -864,16 +925,18 @@ class Win(QtWidgets.QMainWindow):
         if c is not None and c.get("depth_mm") is not None:
             d = c["depth_mm"]
             params = self.colormap_params
-            if os.environ.get("EBRUSH_DEBUG_DEPTH") == "1" and time.monotonic() - getattr(self, "_last_depth_debug", 0) >= 1:
-                self._last_depth_debug = time.monotonic()
-                print(f"[DEPTH] range={d.min()}-{d.max()} valid={(d>0).sum()}/{d.size} near={params['near_mm']} far={params['far_mm']}")
+            print(f"[DEBUG TICK] depth range: {d.min()}-{d.max()}, valid: {(d>0).sum()}/{d.size}, params: near={params['near_mm']}, far={params['far_mm']}, dmin={params['depth_min']}, dmax={params['depth_max']}")
             dep_colored = apply_colormap(d, **params)
             if dep_colored is not None:
                 self.dep.set(dep_colored)
+                print(f"[DEBUG TICK] depth colored shape: {dep_colored.shape}, range: {dep_colored.min()}-{dep_colored.max()}")
 
-
-        # Live overlay is updated only when a NEW SAM3 result arrives above.
-        # Re-rendering a high-resolution mask every 16ms can block acquisition.
+        # SAM3 mask overlay
+        sr = self.sam.latest()
+        if sr is not None and sr.mask is not None:
+            rgb_ctx = sr.camera_context.get("rgb") if sr.camera_context else None
+            if rgb_ctx is not None:
+                self.maskview.set(overlay(rgb_ctx, sr.mask, "SAM3 mask"))
 
         # Agent publish
         transport = self.br.status()
@@ -902,15 +965,7 @@ class Win(QtWidgets.QMainWindow):
                                       "device_status_names": sample.get('device_status_names')})
         self.agent.publish("pose", self.state.get("pose") or {"reference_state": self.pose.reference_state, "reference_locked": False})
         srn = self.sam.latest()
-        self.agent.publish("sam3", {"last_frame": self.last_sam_result,
-            "prompt": self.sam.prompt,
-            "last_error": getattr(srn, "error", "") if srn else "waiting",
-            "latency_ms": getattr(srn, "latency_ms", None) if srn else None,
-            "score": getattr(srn, "score", None) if srn else None,
-            "mask_count": len(srn.masks) if srn else 0,
-            "object_id_scope": "frame", "label_status": "CANDIDATE",
-            "session_policy": "stateless_per_frame",
-            "live": self.sam.status(), "video": self.video_jobs.status()})
+        self.agent.publish("sam3", {"last_frame": self.last_sam_result, "prompt": self.sam.prompt, "last_error": getattr(srn, "error", "") if srn else "waiting", "latency_ms": getattr(srn, "latency_ms", None) if srn else None, "score": getattr(srn, "score", None) if srn else None})
         self.agent.publish("vision", self.last_validation or {"ok": False, "reason": "waiting"})
         self.agent.publish("validation", self.last_validation or {})
         self.agent.publish("mapper", self.mapper_debug.state())
@@ -1027,9 +1082,8 @@ class Win(QtWidgets.QMainWindow):
         self._settings.setValue("ui/geometry", self.saveGeometry())
         self._settings.setValue("ui/docks", self.saveState())
         self._settings.setValue("ui/layout_mode", self.workspace.mode)
-        self.sam.close()
-        self.video_jobs.close()
         self.agent.close()
+        self.sam.close()
         self.hp.close()
         self.br.close()
         super().closeEvent(e)
@@ -1057,21 +1111,10 @@ def main():
     a = p.parse_args()
     q = QtWidgets.QApplication(sys.argv)
     q.setStyle("Fusion")
-    # Dark palette
-    pal = QtGui.QPalette()
-    pal.setColor(QtGui.QPalette.Window, QtGui.QColor(30, 30, 30))
-    pal.setColor(QtGui.QPalette.WindowText, QtGui.QColor(220, 220, 220))
-    pal.setColor(QtGui.QPalette.Base, QtGui.QColor(25, 25, 25))
-    pal.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(40, 40, 40))
-    pal.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(255, 255, 220))
-    pal.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(0, 0, 0))
-    pal.setColor(QtGui.QPalette.Text, QtGui.QColor(220, 220, 220))
-    pal.setColor(QtGui.QPalette.Button, QtGui.QColor(50, 50, 50))
-    pal.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(220, 220, 220))
-    pal.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 0, 0))
-    pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(0, 120, 215))
-    pal.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
-    q.setPalette(pal)
+    saved_theme = str(QtCore.QSettings("E-Brush", "Studio").value("ui/theme", "light")).lower()
+    if saved_theme not in ("light", "dark"):
+        saved_theme = "light"
+    apply_material_theme(q, saved_theme)
     w = Win(a)
     w.show()
     return q.exec()

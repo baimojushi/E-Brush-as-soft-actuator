@@ -17,10 +17,10 @@ class HallExtrinsicPanel(QtWidgets.QWidget):
         super().__init__()
         outer=QtWidgets.QVBoxLayout(self)
         title=QtWidgets.QLabel("霍尔 ↔ 毛笔外参标定")
-        title.setStyleSheet("font-size:19px;font-weight:600")
+        title.setObjectName("sectionHeading")
         title.setWordWrap(True)
         self.stage=QtWidgets.QLabel("待开始")
-        self.stage.setStyleSheet("font-size:20px;font-weight:600")
+        self.stage.setObjectName("panelHeadline")
         self.stage.setWordWrap(True)
         self.hint=QtWidgets.QLabel(
             "先在“姿态映射校准”完成 UP_R0 参考锁定。"
