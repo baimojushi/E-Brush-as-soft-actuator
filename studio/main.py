@@ -44,7 +44,12 @@ from hall_panel import HallPanel
 from hall_extrinsic import HallExtrinsicCalibration
 from hall_extrinsic_ui import HallExtrinsicPanel
 from responsive_workspace import ResponsiveWorkspace
-from material_theme import apply_material_theme, tokens as material_tokens
+from quality_monitor import AcquisitionQualityMonitor
+from material_theme import apply_theme, PALETTES
+from studio_sections import SectionNavigation, VIEW_PRESETS
+from research_panels import AcquisitionQualityPanel, AgentAuditPanel, RCStudioHandoffPanel
+from data_handoff import save_manifest
+from rcstudio_bridge import probe_rcstudio
 from PySide6 import QtCore,QtWidgets,QtGui
 import pyqtgraph as pg
 
@@ -158,7 +163,7 @@ def overlay(rgb,mask=None,axis_text=None):
 class ValidationPanel(QtWidgets.QWidget):
     def __init__(self):
         super().__init__();L=QtWidgets.QVBoxLayout(self)
-        self.big=QtWidgets.QLabel("SAM3 waiting…");self.big.setObjectName("panelHeadline")
+        self.big=QtWidgets.QLabel("SAM3 waiting…");self.big.setStyleSheet("font-size:19px;font-weight:700")
         self.big.setWordWrap(True)
         self.big.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         L.addWidget(self.big)
@@ -183,7 +188,7 @@ class ColormapControlPanel(QtWidgets.QWidget):
 
         # Title
         title = QtWidgets.QLabel("深度图色彩控制")
-        title.setObjectName("sectionHeading")
+        title.setObjectName("section_heading")
         L.addWidget(title)
 
         # Colormap type
@@ -278,12 +283,17 @@ class ColormapControlPanel(QtWidgets.QWidget):
         }
 
 class Win(QtWidgets.QMainWindow):
+    rcProbeReady = QtCore.Signal(dict)
+
     def __init__(self, a):
         super().__init__()
         self._settings = QtCore.QSettings("E-Brush", "Studio")
-        self._theme_mode = str(self._settings.value("ui/theme", "light")).lower()
-        if self._theme_mode not in ("light", "dark"):
+        self._theme_mode = self._settings.value("ui/theme", "light")
+        if self._theme_mode not in PALETTES:
             self._theme_mode = "light"
+        apply_theme(QtWidgets.QApplication.instance(), self._theme_mode)
+        self._style_plots()
+        self.rcProbeReady.connect(self._on_rc_probe_ready)
         screen = QtWidgets.QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
@@ -292,7 +302,7 @@ class Win(QtWidgets.QMainWindow):
         else:
             self.resize(1450, 850)
         self.setMinimumSize(720, 520)
-        self.setWindowTitle("E-Brush Studio | Material 3 Workspace")
+        self.setWindowTitle("E-Brush Studio · Material 3 · 采集 / 标定 / 数据交接")
 
         cfg = json.loads((ROOT/"config"/"vision_validation.json").read_text(encoding="utf-8"))
         self.cfg = cfg
@@ -321,6 +331,9 @@ class Win(QtWidgets.QMainWindow):
         self.hall_cal = HallExtrinsicCalibration(ROOT, self.hall, self.pose, self.mapper_debug)
         self.patch = HotPatch(ROOT/"patches"/"visual_patch.py")
         self.state = {"camera": None, "brush": None, "pose": None, "hall": None}
+        self.quality_monitor = AcquisitionQualityMonitor()
+        self._last_quality = {}
+        self._last_dashboard_update = 0.0
         self._last_display_token = None
 
         # SAM3
@@ -365,11 +378,14 @@ class Win(QtWidgets.QMainWindow):
         self.hallui = HallPanel()
         self.calui = PoseCalibrationPanel()
         self.hallcalui = HallExtrinsicPanel()
-        self._apply_plot_theme()
-        if hasattr(self.scene3d, "set_theme"):
-            self.scene3d.set_theme(self._theme_mode)
+        self.quality_panel = AcquisitionQualityPanel()
+        self.audit_panel = AgentAuditPanel()
+        self.handoff_panel = RCStudioHandoffPanel()
+        self.handoff_panel.probeRequested.connect(self._probe_rcstudio)
+        self.handoff_panel.exportRequested.connect(self._export_handoff)
 
         self._views = [
+            ("采集质量", self.quality_panel),
             ("彩色图像", self.rgb),
             ("深度图", self.dep),
             ("SAM3 掩膜叠加", self.maskview),
@@ -378,38 +394,55 @@ class Win(QtWidgets.QMainWindow):
             ("霍尔磁通", self.hallui),
             ("姿态映射校准", self.calui),
             ("霍尔外参标定", self.hallcalui),
+            ("Agent 操作审计", self.audit_panel),
+            ("RC Studio 数据交接", self.handoff_panel),
         ]
         central = QtWidgets.QWidget()
-        central.setObjectName("appCentral")
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
-        main_layout.setContentsMargins(10, 9, 10, 8)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
 
-        # Material 3 app bar: identity, live device states and theme control.
-        main_layout.addWidget(self._build_app_bar())
+        self.header = QtWidgets.QWidget()
+        self.header.setObjectName("studio_header")
+        top = QtWidgets.QHBoxLayout(self.header)
+        top.setContentsMargins(14, 9, 14, 9)
+        top.setSpacing(12)
+        branding = QtWidgets.QVBoxLayout()
+        branding.setSpacing(1)
+        brand = QtWidgets.QLabel("E·BRUSH  /  STUDIO")
+        brand.setObjectName("studio_brand")
+        branding.addWidget(brand)
+        subtitle = QtWidgets.QLabel("感知与标定工作台  ·  Material 3")
+        subtitle.setObjectName("studio_subtitle")
+        branding.addWidget(subtitle)
+        top.addLayout(branding, 1)
+        self.theme_button = QtWidgets.QToolButton()
+        self.theme_button.clicked.connect(self._toggle_theme)
+        self._update_theme_button()
+        top.addWidget(self.theme_button)
+        main_layout.addWidget(self.header)
 
-        # Persistent camera/OpenGL/calibration views are reflowed, never recreated.
+        self.navigation = SectionNavigation()
+        self.navigation.sectionChanged.connect(self._select_section)
+        main_layout.addWidget(self.navigation)
+
+        # A width-aware workspace replaces the old fixed three-column grid.
+        # Persistent views keep their camera, OpenGL and calibration state.
         self.workspace = ResponsiveWorkspace(self._views)
         self.workspace.sidebarToggleRequested.connect(self._toggle_sidebars)
         self.workspace.resetLayoutRequested.connect(self._reset_ui_layout)
         main_layout.addWidget(self.workspace, 1)
-        self._apply_plot_theme()
-        self.statusBar().showMessage("\u672c\u5730\u5de5\u4f5c\u53f0  \u00b7  \u91c7\u96c6\u3001\u6807\u5b9a\u4e0e\u5206\u6790\u6570\u636e\u4fdd\u5b58\u5728\u672c\u5730")
-        agent_status = QtWidgets.QLabel(f"Agent  {self.agent.host}:{self.agent.port}")
-        agent_status.setObjectName("mutedLabel")
-        self.statusBar().addPermanentWidget(agent_status)
 
         # ---- Docks ----
         # Right dock: Runtime + Colormap
-        d = QtWidgets.QDockWidget("\u8bbe\u5907\u4e0e\u89c6\u89c9", self)
+        d = QtWidgets.QDockWidget("Runtime / 色彩控制", self)
         d.setObjectName("dock_runtime_colormap")
         d.setMinimumWidth(245)
         self._runtime_dock = d
         w = QtWidgets.QWidget()
         f = QtWidgets.QVBoxLayout(w)
-        f.setContentsMargins(12, 12, 12, 12)
-        f.setSpacing(10)
+        f.setSpacing(8)
 
         # Runtime status
         self.prompt = QtWidgets.QLineEdit(self.sam.prompt)
@@ -423,37 +456,35 @@ class Win(QtWidgets.QMainWindow):
         self.status.setReadOnly(True)
         self.status.setMaximumHeight(200)
 
-        b = QtWidgets.QPushButton("\u91cd\u65b0\u5f00\u59cb UP0 \u6821\u51c6")
-        b.setProperty("primary", "true")
+        b = QtWidgets.QPushButton("重新开始 UP0 校准")
         b.clicked.connect(lambda: self._cal_ui_call(self.pose_cal.start))
-        h = QtWidgets.QPushButton("\u68c0\u67e5 SAM3 ")
+        h = QtWidgets.QPushButton("检查 SAM3")
         h.clicked.connect(self.check_health)
 
-        f.addWidget(QtWidgets.QLabel("SAM3 \u63d0\u793a\u8bcd")); f.addWidget(self.prompt)
-        f.addWidget(QtWidgets.QLabel("\u7247\u6bb5\u5e27\u6570")); f.addWidget(self.clip_frames)
-        f.addWidget(QtWidgets.QLabel("\u7247\u6bb5\u5e27\u7387")); f.addWidget(self.clip_fps)
+        f.addWidget(QtWidgets.QLabel("SAM3 Prompt")); f.addWidget(self.prompt)
+        f.addWidget(QtWidgets.QLabel("Clip Frames")); f.addWidget(self.clip_frames)
+        f.addWidget(QtWidgets.QLabel("Clip FPS")); f.addWidget(self.clip_fps)
         f.addWidget(h); f.addWidget(b); f.addWidget(self.status)
 
         # Colormap control panel
         self.colormap_panel = ColormapControlPanel(self._on_colormap_change)
-        f.addWidget(QtWidgets.QLabel("\u6df1\u5ea6\u56fe\u8272\u5f69\u6620\u5c04"))
+        f.addWidget(QtWidgets.QLabel("—— 深度图色彩映射 ——"))
         f.addWidget(self.colormap_panel)
 
         # Brush serial reconnection panel
         self.brush_panel = QtWidgets.QGroupBox("毛笔串口重连")
-        self.brush_panel.setObjectName("brushPanel")
+        self.brush_panel.setStyleSheet("font-weight:600; font-size:12px;")
         bl = QtWidgets.QVBoxLayout(self.brush_panel)
         bl.setContentsMargins(8, 8, 8, 8)
         bl.setSpacing(6)
 
         self.brush_status_lbl = QtWidgets.QLabel("状态: 检测中...")
-        self.brush_status_lbl.setObjectName("statusText")
-        self.brush_status_lbl.setProperty("state", "warning")
+        self.brush_status_lbl.setStyleSheet("font-size:12px;")
         self.brush_status_lbl.setWordWrap(True)
         bl.addWidget(self.brush_status_lbl)
 
         self.brush_port_lbl = QtWidgets.QLabel("端口: 未连接")
-        self.brush_port_lbl.setObjectName("mutedLabel")
+        self.brush_port_lbl.setObjectName("studio_caption")
         self.brush_port_lbl.setWordWrap(True)
         bl.addWidget(self.brush_port_lbl)
 
@@ -462,7 +493,7 @@ class Win(QtWidgets.QMainWindow):
         self.brush_imu_lbl = QtWidgets.QLabel("IMU: 等待有效 DATA")
         for label in (self.brush_hall_lbl, self.brush_imu_lbl):
             label.setWordWrap(True)
-            label.setObjectName("mutedLabel")
+            label.setObjectName("studio_caption")
             bl.addWidget(label)
 
         row = QtWidgets.QWidget()
@@ -470,8 +501,7 @@ class Win(QtWidgets.QMainWindow):
         rh.setContentsMargins(0, 0, 0, 0)
         self.btn_brush_reconnect = QtWidgets.QPushButton("手动重连")
         self.btn_brush_reconnect.clicked.connect(self._manual_brush_reconnect)
-        self.btn_brush_reconnect.setMinimumHeight(32)
-        self.btn_brush_reconnect.setProperty("primary", "true")
+        self.btn_brush_reconnect.setMinimumHeight(28)
         self.chk_auto_reconnect = QtWidgets.QCheckBox("自动重连")
         self.chk_auto_reconnect.setChecked(True)
         self.chk_auto_reconnect.toggled.connect(self._toggle_auto_reconnect)
@@ -492,14 +522,14 @@ class Win(QtWidgets.QMainWindow):
         # Left dock: a compact, scrollable mapping editor. The previous
         # QFormLayout placed three large spinboxes beside a long label and
         # forced this dock to steal half of the central viewport.
-        md = QtWidgets.QDockWidget("\u5750\u6807\u6620\u5c04\u8c03\u8bd5", self)
+        md = QtWidgets.QDockWidget("映射快捷调试", self)
         md.setObjectName("dock_mapper_debug")
         md.setMinimumWidth(245)
         self._mapper_dock = md
         mw = QtWidgets.QWidget()
         mf = QtWidgets.QVBoxLayout(mw)
-        mf.setContentsMargins(12, 12, 12, 12)
-        mf.setSpacing(10)
+        mf.setContentsMargins(8, 8, 8, 8)
+        mf.setSpacing(8)
         self.map_spins = []
         for group, label in (("board", "纸面坐标 XYZ °"), ("brush", "毛笔/安装 XYZ °")):
             group_box = QtWidgets.QGroupBox(label)
@@ -579,118 +609,88 @@ class Win(QtWidgets.QMainWindow):
         if saved_mode not in ("auto", "two", "one", "tabs"):
             saved_mode = "auto"
         self.workspace.set_layout_mode(saved_mode)
+        selected = self._settings.value("ui/section", "overview")
+        self.navigation.select(selected if selected in VIEW_PRESETS else "overview")
         self._sync_sidebars_button()
+        self.statusBar().showMessage("E-Brush 负责设备采集和数据交接；训练由 RC Studio 独立执行")
 
         # Timer
         self.t = QtCore.QTimer()
         self.t.timeout.connect(self.tick)
         self.t.start(16)
-        self._update_topbar_status()
 
-    # ---- Material 3 application shell ----
-    @staticmethod
-    def _make_status_chip(text, state="neutral"):
-        label = QtWidgets.QLabel(text)
-        label.setProperty("role", "statusChip")
-        label.setProperty("state", state)
-        label.setAlignment(QtCore.Qt.AlignCenter)
-        return label
+    # ---- E-Brush-only navigation, Material theme and RC handoff ----
+    def _select_section(self, name):
+        """Select existing QWidget instances; never start a second device reader."""
+        labels = set(VIEW_PRESETS[name])
+        indices = [i for i, (label, _widget) in enumerate(self._views) if label in labels]
+        self.workspace.select_views(indices)
+        self._settings.setValue("ui/section", name)
 
-    def _build_app_bar(self):
-        bar = QtWidgets.QFrame()
-        bar.setObjectName("appBar")
-        bar.setFixedHeight(72)
-        layout = QtWidgets.QHBoxLayout(bar)
-        layout.setContentsMargins(14, 9, 14, 9)
-        layout.setSpacing(10)
+    def _update_theme_button(self):
+        self.theme_button.setText("☾ 深色" if self._theme_mode == "light" else "☀ 浅色")
+        self.theme_button.setToolTip("切换 Material 3 浅色 / 深色主题")
 
-        brand = QtWidgets.QLabel("EB")
-        brand.setObjectName("brandMark")
-        layout.addWidget(brand)
-
-        identity = QtWidgets.QVBoxLayout()
-        identity.setContentsMargins(0, 0, 0, 0)
-        identity.setSpacing(1)
-        title = QtWidgets.QLabel("E-Brush Studio")
-        title.setObjectName("appTitle")
-        subtitle = QtWidgets.QLabel("\u5b9e\u65f6\u611f\u77e5  \u00b7  \u59ff\u6001\u878d\u5408  \u00b7  \u89c6\u89c9\u6807\u5b9a")
-        subtitle.setObjectName("appSubtitle")
-        identity.addWidget(title)
-        identity.addWidget(subtitle)
-        layout.addLayout(identity)
-        layout.addStretch(1)
-
-        self._topbar_brush = self._make_status_chip("\u7b14\u7aef  \u00b7  \u521d\u59cb\u5316", "neutral")
-        self._topbar_camera = self._make_status_chip("\u76f8\u673a  \u00b7  \u521d\u59cb\u5316", "neutral")
-        self._topbar_sam = self._make_status_chip("SAM3  \u00b7  \u5f85\u673a", "neutral")
-        for chip in (self._topbar_brush, self._topbar_camera, self._topbar_sam):
-            layout.addWidget(chip)
-
-        self._theme_button = QtWidgets.QPushButton()
-        self._theme_button.setProperty("role", "iconButton")
-        self._theme_button.setText("\u6df1\u8272" if self._theme_mode == "light" else "\u6d45\u8272")
-        self._theme_button.setToolTip("\u5207\u6362 Material 3 \u6d45\u8272 / \u6df1\u8272\u4e3b\u9898")
-        self._theme_button.clicked.connect(self._toggle_theme)
-        layout.addWidget(self._theme_button)
-        return bar
-
-    @staticmethod
-    def _set_chip(chip, text, state):
-        if chip.text() == text and chip.property("state") == state:
-            return
-        chip.setText(text)
-        chip.setProperty("state", state)
-        chip.style().unpolish(chip)
-        chip.style().polish(chip)
-
-    def _update_topbar_status(self):
-        brush = self.br.status()
-        if brush.get("streaming_data"):
-            self._set_chip(self._topbar_brush, "\u7b14\u7aef  \u00b7  \u6570\u636e\u6b63\u5e38", "success")
-        elif brush.get("connected"):
-            self._set_chip(self._topbar_brush, "\u7b14\u7aef  \u00b7  \u5df2\u8fde\u63a5", "warning")
-        else:
-            self._set_chip(self._topbar_brush, "\u7b14\u7aef  \u00b7  \u672a\u8fde\u63a5", "error")
-
-        camera = self.hp.status()
-        if self.state.get("camera") is not None:
-            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u5b9e\u65f6\u5e27\u6b63\u5e38", "success")
-        elif camera.get("state") == "DISABLED":
-            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u5df2\u5173\u95ed", "neutral")
-        elif camera.get("attached"):
-            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u5df2\u8fde\u63a5", "warning")
-        else:
-            self._set_chip(self._topbar_camera, "\u76f8\u673a  \u00b7  \u7b49\u5f85\u8fde\u63a5", "warning")
-
-        result = self.sam.latest()
-        if result is None:
-            self._set_chip(self._topbar_sam, "SAM3  \u00b7  \u7b49\u5f85\u5e27", "neutral")
-        elif getattr(result, "error", None):
-            self._set_chip(self._topbar_sam, "SAM3  \u00b7  \u9700\u8981\u68c0\u67e5", "warning")
-        else:
-            self._set_chip(self._topbar_sam, "SAM3  \u00b7  \u5df2\u8fd4\u56de\u7ed3\u679c", "success")
+    def _style_plots(self):
+        c = PALETTES[self._theme_mode]
+        pg.setConfigOption("background", c["surface_low"])
+        pg.setConfigOption("foreground", c["text"])
 
     def _toggle_theme(self):
         self._theme_mode = "dark" if self._theme_mode == "light" else "light"
+        apply_theme(QtWidgets.QApplication.instance(), self._theme_mode)
         self._settings.setValue("ui/theme", self._theme_mode)
-        app = QtWidgets.QApplication.instance()
-        colors = apply_material_theme(app, self._theme_mode)
-        self._theme_button.setText("\u6df1\u8272" if self._theme_mode == "light" else "\u6d45\u8272")
-        self._apply_plot_theme(colors)
-        if hasattr(self.scene3d, "set_theme"):
-            self.scene3d.set_theme(self._theme_mode)
-
-    def _apply_plot_theme(self, colors=None):
-        c = colors or material_tokens(self._theme_mode)
-        pg.setConfigOption("background", c["plot_background"])
-        pg.setConfigOption("foreground", c["on_surface_variant"])
+        self._style_plots()
+        self._update_theme_button()
+        c = PALETTES[self._theme_mode]
+        for plot in self.findChildren(pg.GraphicsLayoutWidget):
+            plot.setBackground(c["surface_low"])
         for plot in self.findChildren(pg.PlotWidget):
-            plot.setBackground(c["plot_background"])
-            for axis_name in ("left", "bottom", "right", "top"):
-                axis = plot.getAxis(axis_name)
-                axis.setPen(c["outline_variant"])
-                axis.setTextPen(c["on_surface_variant"])
-            plot.getPlotItem().showGrid(x=True, y=True, alpha=0.12)
+            plot.setBackground(c["surface_low"])
+        for axis in (self.val.plot.getAxis("left"), self.val.plot.getAxis("bottom")):
+            axis.setPen(c["text"])
+            axis.setTextPen(c["text"])
+
+    def _probe_rcstudio(self):
+        """Optional explicit GET request to localhost; never sends a command."""
+        import threading
+        self.handoff_panel.btn_probe.setEnabled(False)
+        def run():
+            try:
+                result = probe_rcstudio(port=8766)
+            except Exception as exc:
+                result = {"reachable": False, "verified": False, "message": str(exc)}
+            self.rcProbeReady.emit(result)
+        threading.Thread(target=run, name="RCStudioReadOnlyProbe", daemon=True).start()
+
+    def _on_rc_probe_ready(self, result):
+        self.handoff_panel.btn_probe.setEnabled(True)
+        self.handoff_panel.show_probe(result)
+
+    def _export_handoff(self):
+        """Save sidecar manifest only; RC Studio imports the data separately."""
+        from datetime import datetime
+        source, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "选择 E-Brush 原始日志或 CSV", str(ROOT / "logs"),
+            "Brush data (*.brlog *.csv)")
+        if not source:
+            return
+        export_dir = ROOT / "runtime" / "handoffs"
+        suggested = f"{Path(source).stem}_{datetime.now():%Y%m%d_%H%M%S}.handoff.json"
+        destination, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "保存 RC Studio 移交清单（不复制数据）",
+            str(export_dir / suggested), "JSON (*.json)")
+        if not destination:
+            return
+        try:
+            save_manifest(source, destination, self._last_quality)
+            self.handoff_panel.show_export(destination, source)
+            self.agent.event("data_handoff_manifest", source=source, destination=destination)
+            self.agent.publish("handoff", {"manifest": destination, "source": source,
+                                           "training_triggered": False})
+            self.statusBar().showMessage("移交清单已生成 · RC Studio 未收到写操作", 8000)
+        except (OSError, ValueError) as exc:
+            QtWidgets.QMessageBox.warning(self, "生成移交清单失败", str(exc))
 
     # ---- Responsive workspace & side docks ----
     def _toggle_sidebars(self):
@@ -736,18 +736,15 @@ class Win(QtWidgets.QMainWindow):
         flowing = s.get('streaming_data', False)
         if flowing:
             self.brush_status_lbl.setText(
-                f"\u72b6\u6001: \u5df2\u6536\u5230\u5408\u6cd5 DATA  \u00b7  {s.get('valid_data_frames', 0)} \u5e27")
-            state = "success"
+                f"状态: 已收到合法 DATA ✓ ({s.get('valid_data_frames', 0)} 帧)")
+            color = PALETTES[self._theme_mode]['success']
         elif connected:
-            self.brush_status_lbl.setText("\u72b6\u6001: \u4e32\u53e3\u5df2\u6253\u5f00\uff0c\u7b49\u5f85\u6709\u6548 DATA")
-            state = "warning"
+            self.brush_status_lbl.setText('状态: 串口已打开，但尚无有效 DATA ⚠')
+            color = PALETTES[self._theme_mode]['warning']
         else:
-            self.brush_status_lbl.setText("\u72b6\u6001: \u672a\u8fde\u63a5")
-            state = "error"
-        if self.brush_status_lbl.property("state") != state:
-            self.brush_status_lbl.setProperty("state", state)
-            self.brush_status_lbl.style().unpolish(self.brush_status_lbl)
-            self.brush_status_lbl.style().polish(self.brush_status_lbl)
+            self.brush_status_lbl.setText('状态: 未连接 ✗')
+            color = PALETTES[self._theme_mode]['error']
+        self.brush_status_lbl.setStyleSheet(f'font-size:12px; color:{color};')
         self.brush_port_lbl.setText(f"端口: {s.get('port') or '未检测到'} | {s.get('decoder')}")
         self.brush_port_lbl.setToolTip(
             f"错误: {s.get('error') or 'none'}\n统计: {s.get('parser_stats', {})}")
@@ -829,9 +826,8 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- Tick loop ----
     def tick(self):
-        # Update compact Material status chips before refreshing live views.
+        # Update brush serial status in UI
         self._update_brush_status()
-        self._update_topbar_status()
 
         # A dead camera must not leave the last frame on screen as if live.
         self.state["camera"] = self.hp.poll()
@@ -925,11 +921,9 @@ class Win(QtWidgets.QMainWindow):
         if c is not None and c.get("depth_mm") is not None:
             d = c["depth_mm"]
             params = self.colormap_params
-            print(f"[DEBUG TICK] depth range: {d.min()}-{d.max()}, valid: {(d>0).sum()}/{d.size}, params: near={params['near_mm']}, far={params['far_mm']}, dmin={params['depth_min']}, dmax={params['depth_max']}")
             dep_colored = apply_colormap(d, **params)
             if dep_colored is not None:
                 self.dep.set(dep_colored)
-                print(f"[DEBUG TICK] depth colored shape: {dep_colored.shape}, range: {dep_colored.min()}-{dep_colored.max()}")
 
         # SAM3 mask overlay
         sr = self.sam.latest()
@@ -941,6 +935,13 @@ class Win(QtWidgets.QMainWindow):
         # Agent publish
         transport = self.br.status()
         sample = self.state.get('brush') or {}
+        now_ui = time.monotonic()
+        self._last_quality = self.quality_monitor.update(transport, sample, now=now_ui)
+        if now_ui - self._last_dashboard_update >= .45:
+            self.quality_panel.update_snapshot(self._last_quality)
+            self.audit_panel.update_events(self.agent.events)
+            self.statusBar().showMessage(self._last_quality.get("summary", "等待观测"))
+            self._last_dashboard_update = now_ui
         rs = {
             "camera": self.hp.status(),
             "brush_port": self.br.port,
@@ -958,6 +959,7 @@ class Win(QtWidgets.QMainWindow):
         }
         self.status.setPlainText(json.dumps(rs, ensure_ascii=False, indent=2))
         self.agent.publish("camera", rs["camera"])
+        self.agent.publish("acquisition_quality", self._last_quality)
         self.agent.publish("brush", {"port": self.br.port, "error": transport.get('error'),
                                       "streaming_data": transport.get('streaming_data'),
                                       "valid_data_frames": transport.get('valid_data_frames'),
@@ -1082,6 +1084,7 @@ class Win(QtWidgets.QMainWindow):
         self._settings.setValue("ui/geometry", self.saveGeometry())
         self._settings.setValue("ui/docks", self.saveState())
         self._settings.setValue("ui/layout_mode", self.workspace.mode)
+        self._settings.setValue("ui/theme", self._theme_mode)
         self.agent.close()
         self.sam.close()
         self.hp.close()
@@ -1111,10 +1114,6 @@ def main():
     a = p.parse_args()
     q = QtWidgets.QApplication(sys.argv)
     q.setStyle("Fusion")
-    saved_theme = str(QtCore.QSettings("E-Brush", "Studio").value("ui/theme", "light")).lower()
-    if saved_theme not in ("light", "dark"):
-        saved_theme = "light"
-    apply_material_theme(q, saved_theme)
     w = Win(a)
     w.show()
     return q.exec()

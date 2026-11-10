@@ -17,10 +17,10 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         super().__init__()
         layout = QtWidgets.QVBoxLayout(self)
         self.title = QtWidgets.QLabel("姿态映射校准 · UP0 / UP_R0")
-        self.title.setObjectName("sectionHeading")
+        self.title.setObjectName("section_heading")
         self.title.setWordWrap(True)
         self.stage = QtWidgets.QLabel("IDLE")
-        self.stage.setObjectName("panelHeadline")
+        self.stage.setObjectName("metric_value")
         self.stage.setWordWrap(True)
         self.msg = QtWidgets.QLabel("准备就绪")
         self.msg.setWordWrap(True)
@@ -31,8 +31,27 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
             "注意：六轴 IMU 只能验证是否竖直及静止，不能自行识别 R0 的绝对方向。"
         )
         self.definition.setWordWrap(True)
-        self.definition.setObjectName("definitionCard")
+        self.definition.setObjectName("studio_caption")
 
+        # Single-source stepper: visual guidance only, never advances the state machine.
+        self.step_names = (
+            ("ON_STAND", "01  放置笔架 / 静止"),
+            ("PICK_UP", "02  拿起毛笔 / 动作"),
+            ("UP_R0", "03  UP0 竖直 / 人工确认 R0"),
+            ("X_TEST", "04  +X 倾斜 / 自动验证"),
+            ("Y_TEST", "05  +Y 倾斜 / 自动验证"),
+            ("ROLL_TEST", "06  轴向旋转 / 自动验证"),
+            ("REVIEW", "07  复核 / 保存结果"),
+        )
+        self.steps = QtWidgets.QListWidget()
+        self.steps.setObjectName("calibration_stepper")
+        self.steps.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.steps.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.steps.setMinimumHeight(155)
+        self.steps.setMaximumHeight(185)
+        for _, title in self.step_names:
+            self.steps.addItem("○ " + title)
+        self._last_step = None
         self.progress = QtWidgets.QProgressBar()
         self.progress.setRange(0, 100)
 
@@ -87,7 +106,7 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         self.detail = QtWidgets.QPlainTextEdit()
         self.detail.setReadOnly(True)
         self.detail.setMinimumHeight(100)
-        for w in (self.title, self.definition, self.stage, self.msg, self.progress):
+        for w in (self.title, self.definition, self.steps, self.stage, self.msg, self.progress):
             layout.addWidget(w)
         layout.addLayout(row)
         layout.addLayout(save)
@@ -131,6 +150,16 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
             "Reference lost; repeat UP0 confirmation": "参考失效，请重新确认 UP0",
         }
         self.stage.setText(stage_zh.get(stage, stage))
+        if stage != self._last_step:
+            self._last_step = stage
+            active = next((i for i, (name, _) in enumerate(self.step_names) if name == stage), -1)
+            if stage == "COMMITTED":
+                active = len(self.step_names)
+            for i, (_name, title) in enumerate(self.step_names):
+                glyph = "✓" if i < active else ("▶" if i == active else "○")
+                self.steps.item(i).setText(glyph + "  " + title)
+            if 0 <= active < len(self.step_names):
+                self.steps.scrollToItem(self.steps.item(active))
         self.msg.setText(msg_zh.get(state.get("message", ""), state.get("message", "")))
         self.progress.setValue(int(state.get("quality_score", 0)))
         self.up0_button.setEnabled(stage == "UP_R0" and state.get("up0_confirmation_required", False))

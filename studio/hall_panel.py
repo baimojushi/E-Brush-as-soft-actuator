@@ -104,7 +104,7 @@ class HallPanel(QtWidgets.QWidget):
         super().__init__()
         L=QtWidgets.QVBoxLayout(self)
         title=QtWidgets.QLabel("霍尔三轴 / 磁通可视化")
-        title.setObjectName("sectionHeading")
+        title.setStyleSheet("font-size:19px;font-weight:600")
         title.setWordWrap(True)
         self.preview=FluxPreview()
         self.form=QtWidgets.QFormLayout()

@@ -40,3 +40,6 @@ __pycache__/
 
 # e-Brush runtime state — untracked per project decision
 runtime/
+# Large logs and tool bundle — not part of source
+logs/
+tools.zip

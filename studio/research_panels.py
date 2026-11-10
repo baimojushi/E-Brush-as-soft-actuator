@@ -1,0 +1,155 @@
+"""Passive quality and handoff views for E-Brush Studio.
+
+Both panels intentionally have no dependency on RC Studio's training code.
+"""
+from __future__ import annotations
+import time
+from PySide6 import QtCore, QtWidgets
+
+
+def _heading(text, name="section_heading"):
+    label = QtWidgets.QLabel(text)
+    label.setObjectName(name)
+    label.setWordWrap(True)
+    return label
+
+
+def _caption(text):
+    return _heading(text, "studio_caption")
+
+
+class _Metric(QtWidgets.QWidget):
+    def __init__(self, title):
+        super().__init__()
+        self.setObjectName("metric_card")
+        box = QtWidgets.QVBoxLayout(self)
+        box.setContentsMargins(14, 12, 14, 12)
+        box.setSpacing(4)
+        box.addWidget(_caption(title))
+        self.value = _heading("—", "metric_value")
+        box.addWidget(self.value)
+        self.setMinimumWidth(125)
+
+
+class AcquisitionQualityPanel(QtWidgets.QWidget):
+    """Dashboard driven by monotonically increasing parser counters."""
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        layout.addWidget(_heading("实时采集质量"))
+        layout.addWidget(_caption("只读观测 · 来源：BRUSH-V1 解码器计数与最新传感器状态"))
+        self.summary = _heading("等待设备数据", "quality_waiting")
+        layout.addWidget(self.summary)
+        row = QtWidgets.QGridLayout()
+        row.setSpacing(8)
+        self.rate = _Metric("主机接收速率（近 4 秒）")
+        self.loss = _Metric("帧编号缺口率（近 4 秒）")
+        self.imu = _Metric("IMU 最新状态")
+        self.hall = _Metric("Hall 最新状态")
+        for n, widget in enumerate((self.rate, self.loss, self.imu, self.hall)):
+            row.addWidget(widget, n // 2, n % 2)
+        layout.addLayout(row)
+        self.details = QtWidgets.QLabel("等待状态计数")
+        self.details.setWordWrap(True)
+        layout.addWidget(self.details)
+        layout.addWidget(_caption("200 Hz 是设备设计目标，不是软件保证的实测频率。UI 轮询不会被误计为采样次数。"))
+        layout.addStretch()
+
+    def update_snapshot(self, data):
+        level = data.get("severity", "waiting")
+        self.summary.setObjectName("quality_" + level)
+        self.summary.setText(data.get("summary", "—"))
+        self.summary.style().unpolish(self.summary)
+        self.summary.style().polish(self.summary)
+        hz = data.get("host_receive_hz")
+        pct = data.get("frame_gap_percent_window")
+        self.rate.value.setText("—" if hz is None else f"{hz:.1f} Hz")
+        self.loss.value.setText("—" if pct is None else f"{pct:.2f}%")
+        self.imu.value.setText(data.get("imu", "—"))
+        self.hall.value.setText(data.get("hall", "—"))
+        for label in (self.imu.value, self.hall.value):
+            label.setStyleSheet("font-size:15px; font-weight:700")
+        flags = ", ".join(data.get("drop_flags") or ()) or "无"
+        self.details.setText(
+            f"端口：{data.get('port') or '未连接'}  |  累计解码：{data.get('total_decoded_frames', 0):,} 帧\n"
+            f"累计编号缺口：{data.get('total_frame_id_gaps', 0):,}  |  最新丢弃标志：{flags}\n"
+            f"解析器信息：{data.get('parser_error') or '无已报告错误'}")
+
+
+class AgentAuditPanel(QtWidgets.QWidget):
+    """Display recent operations on the existing AgentControl event stream."""
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(_heading("Agent 操作记录"))
+        layout.addWidget(_caption("显示 E-Brush 本地控制接口最近的操作事件；训练和模型操作不属于本服务"))
+        self.entries = QtWidgets.QPlainTextEdit()
+        self.entries.setReadOnly(True)
+        layout.addWidget(self.entries, 1)
+        self._last_key = None
+
+    def update_events(self, entries):
+        recs = list(entries)[-60:]
+        key = (len(recs), recs[-1].get("t_unix") if recs else None)
+        if key == self._last_key:
+            return
+        self._last_key = key
+        lines = []
+        for rec in recs:
+            event = rec.get("event", "event")
+            stamp = time.strftime("%H:%M:%S", time.localtime(rec.get("t_unix", 0)))
+            subject = rec.get("name") or rec.get("path") or ""
+            # Avoid displaying request payloads, tokens, or arbitrary command arguments.
+            lines.append(f"{stamp}    {event}    {subject}")
+        self.entries.setPlainText("\n".join(lines) if lines else "尚无 Agent 操作")
+
+
+class RCStudioHandoffPanel(QtWidgets.QWidget):
+    """Explicit boundary: only check localhost service and save source manifest."""
+    probeRequested = QtCore.Signal()
+    exportRequested = QtCore.Signal()
+
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(14)
+        layout.addWidget(_heading("E-Brush → RC Studio 数据交接"))
+        layout.addWidget(_caption("两套独立应用 · 无内嵌训练 · 无串口共享 · 不写入 RC Studio 数据库"))
+        ownership = QtWidgets.QGroupBox("责任边界")
+        owners = QtWidgets.QVBoxLayout(ownership)
+        text = QtWidgets.QLabel(
+            "E-Brush Studio：负责设备、传感器、实时采集、标定、原始日志与移交清单。\n\n"
+            "RC Studio：独立负责日志解析与清洗、采样片段、ESN 训练、基线评估、模型及实验管理。\n\n"
+            "EBrush Motion Predictor V1 是 RC Studio 的内部研究项目，不在此处重复实现。"
+        )
+        text.setWordWrap(True)
+        owners.addWidget(text)
+        layout.addWidget(ownership)
+        actions = QtWidgets.QHBoxLayout()
+        self.btn_probe = QtWidgets.QPushButton("检查 RC Studio（GET 只读）")
+        self.btn_probe.clicked.connect(self.probeRequested.emit)
+        self.btn_export = QtWidgets.QPushButton("生成数据移交清单…")
+        self.btn_export.setObjectName("primary_action")
+        self.btn_export.clicked.connect(self.exportRequested.emit)
+        actions.addWidget(self.btn_probe)
+        actions.addWidget(self.btn_export)
+        layout.addLayout(actions)
+        self.service = QtWidgets.QLabel("RC Studio 127.0.0.1:8766 · 未检查")
+        self.service.setWordWrap(True)
+        layout.addWidget(self.service)
+        self.export_info = QtWidgets.QPlainTextEdit()
+        self.export_info.setReadOnly(True)
+        self.export_info.setPlaceholderText("移交记录（仅本地 JSON 元数据；不会上传、训练或修改原始日志）")
+        self.export_info.setMaximumHeight(200)
+        layout.addWidget(self.export_info)
+        layout.addWidget(_caption("生成清单后，请在 RC Studio 使用其现有导入接口处理 .brlog 或 CSV；清单不是训练数据文件。"))
+        layout.addStretch()
+
+    def show_probe(self, result):
+        self.service.setText(result.get("message", "未知状态") + " · 127.0.0.1:8766")
+
+    def show_export(self, filename, source):
+        self.export_info.setPlainText(f"清单已保存：{filename}\n原始数据：{source}\n未复制、转换或上传数据；未触发 RC 训练。")

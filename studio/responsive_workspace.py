@@ -1,7 +1,9 @@
-"""Material 3-inspired responsive workspace for E-Brush Studio.
+"""Responsive, persistent-view workspace for E-Brush Studio.
 
-Live camera, OpenGL and calibration widgets remain persistent while the user
-switches between responsive grids and focused tabs.
+Unlike the old fixed sqrt(N) grid, this component reacts to the **actual**
+available central viewport width after both dock panels take their space.  It
+never destroys/recreates live camera/3D/calibration view widgets when a view is
+hidden, a tab is selected or the window is resized.
 """
 from __future__ import annotations
 
@@ -15,10 +17,10 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
     resetLayoutRequested = QtCore.Signal()
 
     MODES = (
-        ("auto", "\u81ea\u52a8\u5206\u680f"),
-        ("two", "\u53cc\u5217\u5bf9\u7167"),
-        ("one", "\u5355\u5217\u5bbd\u5c4f"),
-        ("tabs", "\u6807\u7b7e\u805a\u7126"),
+        ("auto", "自动分栏"),
+        ("two", "双列对照"),
+        ("one", "单列宽屏"),
+        ("tabs", "标签聚焦"),
     )
 
     def __init__(self, views, parent=None):
@@ -32,80 +34,76 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
 
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(2, 2, 2, 2)
-        root.setSpacing(9)
+        root.setSpacing(5)
 
+        # Scroll the control row as well; otherwise its buttons alone can
+        # impose a large minimum width on the whole QMainWindow.
         controls_scroll = QtWidgets.QScrollArea()
         controls_scroll.setObjectName("layout_control_scroll")
         controls_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         controls_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         controls_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         controls_scroll.setWidgetResizable(False)
-        controls_scroll.setFixedHeight(58)
-
-        controls_widget = QtWidgets.QFrame()
-        controls_widget.setObjectName("workspaceToolbar")
+        controls_scroll.setFixedHeight(48)
+        controls_widget = QtWidgets.QWidget()
         controls = QtWidgets.QHBoxLayout(controls_widget)
         controls.setSizeConstraint(QtWidgets.QLayout.SetMinAndMaxSize)
-        controls.setContentsMargins(12, 7, 12, 7)
+        controls.setContentsMargins(4, 0, 4, 0)
         controls.setSpacing(8)
-
-        heading = QtWidgets.QLabel("\u5de5\u4f5c\u533a\u89c6\u56fe")
-        heading.setObjectName("sectionHeading")
-        controls.addWidget(heading)
-
+        controls.addWidget(QtWidgets.QLabel("视图布局"))
         self.mode_combo = QtWidgets.QComboBox()
-        self.mode_combo.setMinimumWidth(112)
         for key, label in self.MODES:
             self.mode_combo.addItem(label, userData=key)
-        self.mode_combo.setToolTip("\u81ea\u52a8\u6a21\u5f0f\u4f1a\u6839\u636e\u53ef\u7528\u5bbd\u5ea6\u8c03\u6574\u5217\u6570")
+        self.mode_combo.setToolTip("自动分栏按可用宽度布局；双列过窄时可横向滚动；标签聚焦只显示当前面板")
         self.mode_combo.currentIndexChanged.connect(self._mode_changed)
         controls.addWidget(self.mode_combo)
 
-        self.all_button = self._make_action("\u5168\u90e8", lambda: self.select_views(range(len(self.views))))
-        self.sensor_button = self._make_action("\u4f20\u611f\u5668", lambda: self.select_views([3, 4, 5]))
-        self.calibration_button = self._make_action("\u6807\u5b9a", lambda: self.select_views([4, 5, 6, 7]))
+        self.all_button = QtWidgets.QPushButton("全部")
+        self.all_button.clicked.connect(lambda: self.select_views(range(len(self.views))))
         controls.addWidget(self.all_button)
+        self.sensor_button = QtWidgets.QPushButton("传感器")
+        self.sensor_button.clicked.connect(lambda: self.select_named_views(["采集质量", "三维场景", "霍尔磁通"]))
         controls.addWidget(self.sensor_button)
+        self.calibration_button = QtWidgets.QPushButton("标定")
+        self.calibration_button.clicked.connect(lambda: self.select_named_views(["姿态映射校准", "霍尔外参标定", "三维场景"]))
         controls.addWidget(self.calibration_button)
         controls.addStretch(1)
-
         self.layout_info = QtWidgets.QLabel("")
-        self.layout_info.setObjectName("mutedLabel")
+        self.layout_info.setObjectName("studio_caption")
         controls.addWidget(self.layout_info)
-
-        self.sidebar_button = self._make_action("\u9690\u85cf\u4fa7\u680f", self.sidebarToggleRequested.emit)
-        self.sidebar_button.setToolTip("\u6536\u8d77\u5de6\u53f3\u5de5\u5177\u680f\uff0c\u4e3a\u4e2d\u592e\u89c6\u56fe\u7559\u51fa\u66f4\u591a\u7a7a\u95f4")
-        self.reset_button = self._make_action("\u91cd\u7f6e\u5e03\u5c40", self.resetLayoutRequested.emit)
-        self.reset_button.setToolTip("\u6062\u590d\u9ed8\u8ba4\u7a97\u53e3\u5e03\u5c40")
+        self.sidebar_button = QtWidgets.QPushButton("隐藏侧栏")
+        self.sidebar_button.setToolTip("临时收起左右工具栏，扩大中央视图；再次点击恢复")
+        self.sidebar_button.clicked.connect(self.sidebarToggleRequested.emit)
         controls.addWidget(self.sidebar_button)
+        self.reset_button = QtWidgets.QPushButton("重置布局")
+        self.reset_button.setToolTip("恢复自动分栏、默认窗口位置和左右工具栏")
+        self.reset_button.clicked.connect(self.resetLayoutRequested.emit)
         controls.addWidget(self.reset_button)
         controls_widget.adjustSize()
         controls_scroll.setWidget(controls_widget)
         root.addWidget(controls_scroll)
 
+        # View selection always scrolls horizontally instead of making the
+        # main window grow wider than a laptop screen.
         self.view_strip = QtWidgets.QScrollArea()
         self.view_strip.setObjectName("view_selector_scroll")
         self.view_strip.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.view_strip.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.view_strip.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.view_strip.setWidgetResizable(False)
-        self.view_strip.setFixedHeight(49)
-
-        strip = QtWidgets.QFrame()
-        strip.setObjectName("viewSelector")
+        self.view_strip.setFixedHeight(53)
+        strip = QtWidgets.QWidget()
         strip_layout = QtWidgets.QHBoxLayout(strip)
         strip_layout.setSizeConstraint(QtWidgets.QLayout.SetMinAndMaxSize)
         strip_layout.setContentsMargins(2, 1, 2, 1)
-        strip_layout.setSpacing(7)
+        strip_layout.setSpacing(6)
         for index, (name, _) in enumerate(self.views):
             button = QtWidgets.QToolButton()
             button.setText(name)
-            button.setObjectName(f"viewFilter_{index}")
-            button.setProperty("role", "filterChip")
             button.setCheckable(True)
             button.setChecked(True)
-            button.setMinimumHeight(34)
-            button.setMinimumWidth(96)
+            button.setMinimumHeight(31)
+            button.setMinimumWidth(99)
             button.toggled.connect(lambda value, i=index: self.set_view_visible(i, value))
             strip_layout.addWidget(button)
             self._toggle_buttons.append(button)
@@ -121,9 +119,9 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         self.grid_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.grid_content = QtWidgets.QWidget()
         self.grid_layout = QtWidgets.QGridLayout(self.grid_content)
-        self.grid_layout.setContentsMargins(5, 5, 5, 8)
-        self.grid_layout.setHorizontalSpacing(12)
-        self.grid_layout.setVerticalSpacing(12)
+        self.grid_layout.setContentsMargins(4, 4, 4, 4)
+        self.grid_layout.setHorizontalSpacing(6)
+        self.grid_layout.setVerticalSpacing(8)
         self.grid_layout.setAlignment(QtCore.Qt.AlignTop)
         self.grid_scroll.setWidget(self.grid_content)
         root.addWidget(self.grid_scroll, 1)
@@ -136,40 +134,24 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         self.tabs.setVisible(False)
         root.addWidget(self.tabs, 1)
 
-        self.empty_label = QtWidgets.QLabel("\u6ca1\u6709\u9009\u4e2d\u7684\u89c6\u56fe\u3002\u8bf7\u4ece\u4e0a\u65b9\u9009\u62e9\u9700\u8981\u663e\u793a\u7684\u9762\u677f\u3002")
+        self.empty_label = QtWidgets.QLabel("没有选中的视图。请从上方选择需要显示的面板。")
         self.empty_label.setAlignment(QtCore.Qt.AlignCenter)
         self.empty_label.setWordWrap(True)
-        self.empty_label.setObjectName("mutedLabel")
+        self.empty_label.setObjectName("studio_caption")
         self.empty_label.hide()
 
         for index, (name, widget) in enumerate(self.views):
-            tile = QtWidgets.QFrame()
-            tile.setObjectName("viewTile")
-            tile.setProperty("viewIndex", index)
+            tile = QtWidgets.QGroupBox(name)
+            tile.setObjectName(f"view_tile_{index}")
             tile.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-
-            tile_layout = QtWidgets.QVBoxLayout(tile)
-            tile_layout.setContentsMargins(11, 8, 11, 10)
-            tile_layout.setSpacing(7)
-
-            header = QtWidgets.QFrame()
-            header.setObjectName("viewTileHeader")
-            header_layout = QtWidgets.QHBoxLayout(header)
-            header_layout.setContentsMargins(2, 1, 2, 1)
-            header_layout.setSpacing(8)
-
-            title = QtWidgets.QLabel(name)
-            title.setObjectName("viewTileTitle")
-            header_layout.addWidget(title)
-            header_layout.addStretch(1)
-
-            meta = QtWidgets.QLabel("\u5b9e\u65f6\u9762\u677f" if index < 6 else "\u6807\u5b9a\u5de5\u5177")
-            meta.setObjectName("viewTileMeta")
-            header_layout.addWidget(meta)
-            tile_layout.addWidget(header)
-            tile_layout.addWidget(widget, 1)
-
-            tile.setMinimumHeight(315 if index < 6 else 350)
+            inner = QtWidgets.QVBoxLayout(tile)
+            inner.setContentsMargins(5, 13, 5, 5)
+            inner.setSpacing(0)
+            inner.addWidget(widget)
+            if name not in ("姿态映射校准", "霍尔外参标定", "RC Studio 数据交接"):
+                tile.setMinimumHeight(300)
+            else:
+                tile.setMinimumHeight(345)
             self._tiles.append(tile)
 
         self._reflow_timer = QtCore.QTimer(self)
@@ -179,20 +161,13 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         self.grid_scroll.viewport().installEventFilter(self)
         self._rebuild()
 
-    @staticmethod
-    def _make_action(text, callback):
-        button = QtWidgets.QPushButton(text)
-        button.setProperty("role", "tonalAction")
-        button.clicked.connect(callback)
-        return button
-
     def eventFilter(self, obj, event):
         if obj is self.grid_scroll.viewport() and event.type() == QtCore.QEvent.Resize:
             self._reflow_timer.start()
         return super().eventFilter(obj, event)
 
     def set_sidebar_visible(self, visible):
-        self.sidebar_button.setText("\u9690\u85cf\u4fa7\u680f" if visible else "\u663e\u793a\u4fa7\u680f")
+        self.sidebar_button.setText("隐藏侧栏" if visible else "显示侧栏")
 
     def set_layout_mode(self, mode):
         idx = self.mode_combo.findData(mode)
@@ -216,6 +191,10 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
             button.blockSignals(False)
         self._rebuild()
 
+    def select_named_views(self, names):
+        chosen = set(names)
+        self.select_views(i for i, (name, _) in enumerate(self.views) if name in chosen)
+
     def select_views(self, indices):
         chosen = set(indices)
         for index, button in enumerate(self._toggle_buttons):
@@ -235,15 +214,20 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
             self._rebuild()
 
     def _rebuild(self):
-        # Preserve the same live widget instances when changing grid/tab modes.
+        # Save the focused view before moving the same persistent QWidget
+        # between a grid and a QTabWidget. Never delete a view on reflow.
         focus_tile = self.tabs.currentWidget()
         for tile in self._tiles:
             tab_index = self.tabs.indexOf(tile)
             if tab_index != -1:
                 self.tabs.removeTab(tab_index)
                 tile.hide()
+                # A tab page remains owned by its old QStackedWidget after
+                # removeTab; detach it before adding it to the grid.
                 tile.setParent(None)
             else:
+                # Reflowing a grid must NOT unparent its OpenGL/camera view:
+                # doing so unnecessarily recreates native window resources.
                 self.grid_layout.removeWidget(tile)
                 tile.hide()
 
@@ -254,7 +238,7 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         visible = [(index, self.views[index][0], self._tiles[index])
                    for index, enabled in enumerate(self.visible_flags) if enabled]
         count = len(visible)
-        columns = max(1, column_count(self.grid_scroll.viewport().width(), count, self.mode))
+        columns = column_count(self.grid_scroll.viewport().width(), count, self.mode)
         self.column_count = columns
 
         if self.mode == "tabs":
@@ -267,7 +251,7 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
                 if focus_index >= 0:
                     self.tabs.setCurrentIndex(focus_index)
             self.grid_content.setMinimumWidth(0)
-            self.layout_info.setText(f"{count} \u4e2a\u89c6\u56fe \u00b7 \u6807\u7b7e")
+            self.layout_info.setText(f"{count} 个视图 · 标签")
             return
 
         self.tabs.hide()
@@ -281,5 +265,7 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         if not count:
             self.grid_layout.addWidget(self.empty_label, 0, 0)
             self.empty_label.show()
-        self.layout_info.setText(f"{count} \u4e2a\u89c6\u56fe \u00b7 {columns} \u5217" if count else "\u65e0\u89c6\u56fe")
+        self.layout_info.setText(f"{count} 个视图 · {columns} 列" if count else "无视图")
+        # Qt adjusts to new tile size hints, without cramming existing panels
+        # into a sqrt(N)-determined fixed column count.
         self.grid_content.updateGeometry()

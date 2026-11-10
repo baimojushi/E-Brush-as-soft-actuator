@@ -156,16 +156,17 @@ See `docs/PROTOCOL.md`. All radio packets have application CRC16, a packet
 sequence number, sample count and C3 timestamps. S3 validates before acting
 on any data; lost samples are flagged, never silently interpolated.
 
-## Material 3 UI iteration
 
-The desktop workspace now uses a Material 3-inspired, role-based theme adapted to PySide6:
+## E-Brush Studio Material 3 UI V1.1
 
-- Light and dark color schemes with persisted selection.
-- App bar with live brush, camera and SAM3 status chips.
-- Responsive view toolbar and selectable view chips.
-- Rounded view cards while preserving the original camera, OpenGL and calibration widgets during layout changes.
-- Theme-aware PyQtGraph plots and 3D scene overlay.
+The native PySide6 UI now includes six navigation sections, a passive BRUSH-V1
+acquisition-quality dashboard, a calibration stepper, an Agent audit view, and
+explicit **read-only** RC Studio status/manifest handoff. E-Brush neither trains
+RC networks nor writes RC Studio experiments or owns its port 8766.
 
-Start the app as before with `RUN_STUDIO.bat`. Use the theme control in the app bar to switch light/dark mode. The design decisions and implementation map are documented in `docs/UI_MATERIAL3_DESIGN.md`.
+See `docs/EBRUSH_MATERIAL3_UI_AND_RC_BOUNDARY_V1_1_CN.md` for Chinese instructions,
+limitations and module ownership. Logic tests (no Qt or hardware required):
 
-The UI theme is implemented with Qt palette roles and QSS tokens; it does not load web components or require network access. The underlying sensor, camera, SAM3, pose-mapping and calibration pipelines remain unchanged.
+```sh
+python -m unittest discover -s studio/tests -p test_research_ui_contracts.py -v
+```
