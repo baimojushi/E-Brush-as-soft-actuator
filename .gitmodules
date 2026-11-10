@@ -1,0 +1,3 @@
+[submodule "rcstudio"]
+	path = rcstudio
+	url = git@github.com:baimojushi/Reservoir-Computing-Studio.git
