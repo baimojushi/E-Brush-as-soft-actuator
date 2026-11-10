@@ -8,6 +8,11 @@ Safe boundaries:
 """
 from __future__ import annotations
 
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
+
 import argparse
 import json
 from pathlib import Path
@@ -63,8 +68,8 @@ def make_main_window(args):
             layout.addWidget(QtWidgets.QLabel(
                 "采集结果默认处于候选状态；深度配准、标定和时间同步需独立验证。"))
             row=QtWidgets.QHBoxLayout()
-            self.btn_start=QtWidgets.QPushButton("开始采集")
-            self.btn_stop=QtWidgets.QPushButton("停止并归档")
+            self.btn_start=_help_anchor(QtWidgets.QPushButton("开始采集"), 'eb.rgbd.start')
+            self.btn_stop=_help_anchor(QtWidgets.QPushButton("停止并归档"), 'eb.rgbd.stop')
             self.btn_stop.setEnabled(False)
             row.addWidget(self.btn_start)
             row.addWidget(self.btn_stop)
@@ -78,7 +83,7 @@ def make_main_window(args):
                 label.setStyleSheet("background:#202028;color:#eeeeee")
                 frame.addWidget(label)
             layout.addLayout(frame)
-            self.status_text=QtWidgets.QPlainTextEdit()
+            self.status_text=_help_anchor(QtWidgets.QPlainTextEdit(), 'eb.rgbd.status')
             self.status_text.setReadOnly(True)
             layout.addWidget(self.status_text)
             self.notice=QtWidgets.QLabel("状态：未启动")
@@ -88,6 +93,12 @@ def make_main_window(args):
             self.timer=QtCore.QTimer(self)
             self.timer.timeout.connect(self.tick)
             self.timer.start(80)
+            from studio.learning_support.integration import install_rgbd
+            self.learning = install_rgbd(self)
+            self.learning_button = _help_anchor(QtWidgets.QPushButton("帮助 · RGB-D 新手教学"), "ui.help")
+            self.learning_button.clicked.connect(lambda: self.learning.open_center(courses=True))
+            row.addWidget(self.learning_button)
+            self.learning.scan()
 
         @staticmethod
         def _pixmap_rgb(rgb):
@@ -192,6 +203,7 @@ def make_main_window(args):
                     status=self.recorder.status()
                     self.status_text.setPlainText(
                         json.dumps(status,ensure_ascii=False,indent=2,default=str))
+                    self._learning_fatal_capture = bool(status["fatal_error"])
                     if status["fatal_error"] and not self.ending:
                         self.notice.setText("采集数据完整性错误："+status["fatal_error"])
                         self.stop_capture()
@@ -215,6 +227,8 @@ def make_main_window(args):
                 self._close_when_finished=True
                 self.stop_capture()
                 return
+            if hasattr(self, "learning"):
+                self.learning.shutdown()
             super().closeEvent(event)
 
     return LiveWindow()

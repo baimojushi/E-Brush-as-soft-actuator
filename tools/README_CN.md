@@ -43,7 +43,7 @@
 - `tilt_from_vertical_deg`：相对竖直方向倾角。
 - `tilt_x_deg / tilt_y_deg`：两个纸面方向的倾斜表示。
 - `shaft_azimuth_deg`：笔杆水平投影方位；笔杆接近竖直时没有物理意义。
-- `heading_rel_deg`：经本次启动 R0 对齐后的相对 heading，不是磁北绝对航向。
+- `heading_rel_deg`：经本次启动 R0 对齐后的相对 heading；磁北航向需要独立的地磁参考。
 - `brush_q_w/x/y/z`：最终 `brush -> board` 四元数。
 - `pose_quality`：基于校准后加速度模长与 1g 的接近程度给出的动态质量提示。
 - `reference_locked`：启动参考是否完成。

@@ -100,7 +100,7 @@ class HallExtrinsicCalibration:
         if self.baseline_path.exists():return
         data=copy.deepcopy(self.hall.data)
         R=np.asarray(data["R_brush_from_hall"],float)
-        if not is_so3(R): raise ValueError("现有 Hall 安装矩阵不是合法 SO(3)")
+        if not is_so3(R): raise ValueError("现有 Hall 安装矩阵未通过 SO(3) 合法性检查")
         _atomic_json(self.baseline_path,{
             "schema":"ebrush.hall_extrinsic_baseline.v1",
             "name":self.baseline_name,
@@ -316,7 +316,7 @@ class HallExtrinsicCalibration:
             result=solve_hall_extrinsic(R,B,self.hall.R_brush_from_hall)
             threshold=max(0.025,0.15*result["field_magnitude_mean_mT"])
             if result["training_rms_mT"]>threshold:
-                raise RuntimeError(f"训练世界磁场 RMS {result['training_rms_mT']:.4f} mT 超过 {threshold:.4f} mT；可能不是均匀静态磁场")
+                raise RuntimeError(f"训练世界磁场 RMS {result['training_rms_mT']:.4f} mT 超过 {threshold:.4f} mT；请检查磁场均匀性和时间稳定性")
             # Sensor-to-sensor orientation: IMU<-Hall is invariant under
             # changes in the board/world heading reference.
             A=np.asarray(self.mapping_fingerprint["pose_mount_matrix"],float)
@@ -325,7 +325,7 @@ class HallExtrinsicCalibration:
             result["R_imu_from_hall"]=(A@Rbd@Q).tolist()
             self.candidate=result
             self.stage="VALIDATE"
-            self.message="求解完成。现在换至少 3 个未参与求解的新方向做独立验证，不要重新调整 Mapper。"
+            self.message="求解完成。接下来使用至少 3 个新方向进行独立验证，并保持 Mapper 参数固定。"
             self.validation.clear()
             return self.state()
 
@@ -409,7 +409,7 @@ class HallExtrinsicCalibration:
 
     def _apply_profile(self,prof):
         R=np.asarray(prof["R_brush_from_hall"],float)
-        if not is_so3(R):raise ValueError("保存的 Hall 外参矩阵不是 SO(3)")
+        if not is_so3(R):raise ValueError("保存的 Hall 外参矩阵未通过 SO(3) 合法性检查")
         baseline=prof.get("schema")=="ebrush.hall_extrinsic_baseline.v1"
         if baseline:
             data=copy.deepcopy(prof["mount_config"])
@@ -502,7 +502,7 @@ class HallExtrinsicCalibration:
             if not is_baseline and (
                 d.get("schema")!="ebrush.hall_extrinsic_profile.v1"
                 or not d.get("validation",{}).get("passed")):
-                raise ValueError("不是已验证的 Hall 外参 profile")
+                raise ValueError("所选 Hall 外参 profile 尚待验证")
             if not is_baseline:
                 self._check_profile_compatibility(d)
             if self.stage in ("COLLECT","VALIDATE","READY"):
@@ -513,5 +513,5 @@ class HallExtrinsicCalibration:
                 "status":"UNVERIFIED_BASELINE" if is_baseline else "VERIFIED_PROFILE",
                 "validation_rms_mT":None if is_baseline else d["validation"]["rms_mT"],
                 "R_brush_from_hall":d["R_brush_from_hall"],
-                "warning":"原始映射仅供回退，不代表通过外参校准" if is_baseline else None,
+                "warning":"原始映射用于回退；正式使用请完成外参校准" if is_baseline else None,
             }

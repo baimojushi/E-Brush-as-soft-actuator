@@ -1,0 +1,13 @@
+{
+  "release": "EBrush-Studio-v1.2.1-Copyedit",
+  "source_package": "EBrush-Studio-v1.2-Learning.zip",
+  "help_topics": 109,
+  "help_entries_revised": 106,
+  "courses": 7,
+  "steps": 44,
+  "help_strings_verified_in_manual_and_html": 1033,
+  "targeted_negative_contrast_patterns_remaining": 0,
+  "tests": "157 passed, 1 skipped in 1.17s",
+  "native_gui_acceptance": "Pending on Windows with PySide6; GUI test is skipped locally",
+  "scope": "Copy editing, synchronized manuals, style-regression tests; core responsibilities unchanged"
+}

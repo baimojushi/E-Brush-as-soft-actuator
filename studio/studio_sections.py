@@ -1,5 +1,10 @@
 """Local navigation presets; never create extra copies of camera/3D views."""
 from __future__ import annotations
+
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
 from PySide6 import QtCore, QtWidgets
 
 SECTIONS = (
@@ -38,7 +43,7 @@ class SectionNavigation(QtWidgets.QWidget):
         lay.setSpacing(6)
         self.buttons = {}
         for key, label in SECTIONS:
-            btn = QtWidgets.QToolButton()
+            btn = _help_anchor(QtWidgets.QToolButton(), 'eb.nav.' + key)
             btn.setText(label)
             btn.setCheckable(True)
             btn.setMinimumHeight(33)

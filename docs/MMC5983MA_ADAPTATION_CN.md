@@ -58,7 +58,7 @@ pio device monitor -p COM3 -b 115200
 
 传感器安装方向、零偏与磁场响应与 TMAG5273 不同；换型号后，旧的霍尔外参
 和基线不能继续作为已验证结果使用。请重新完成霍尔基线和外参标定。
-MMC5983MA 是 3 轴 AMR 磁力计，不是线性 Hall 效应芯片，界面沿用「Hall」
+MMC5983MA 是三轴 AMR 磁力计。界面沿用「Hall」作为历史模块名称，具体物理测量原理是 AMR 磁阻效应
 仅出于兼容项目命名。
 
 厂商手册：MEMSIC `MMC5983MA Datasheet Rev A`：

@@ -1,3 +1,8 @@
+
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
 import argparse,json,sys,time,os,csv,math
 from collections import deque
 from pathlib import Path
@@ -167,8 +172,8 @@ class ValidationPanel(QtWidgets.QWidget):
         self.big.setWordWrap(True)
         self.big.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         L.addWidget(self.big)
-        self.detail=QtWidgets.QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMaximumHeight(330);L.addWidget(self.detail)
-        self.plot=pg.PlotWidget(title="IMU ↔ Vision shaft error");self.plot.setLabel("left","deg");self.plot.setLabel("bottom","samples")
+        self.detail=_help_anchor(QtWidgets.QPlainTextEdit(), 'eb.view.validation');self.detail.setReadOnly(True);self.detail.setMaximumHeight(330);L.addWidget(self.detail)
+        self.plot=_help_anchor(pg.PlotWidget(title="IMU ↔ Vision shaft error"), 'eb.view.validation');self.plot.setLabel("left","deg");self.plot.setLabel("bottom","samples")
         self.curve=self.plot.plot();self.err=deque(maxlen=600);L.addWidget(self.plot)
     def update_result(self,d):
         if not d:return
@@ -192,7 +197,7 @@ class ColormapControlPanel(QtWidgets.QWidget):
         L.addWidget(title)
 
         # Colormap type
-        self.cmb_type = QtWidgets.QComboBox()
+        self.cmb_type = _help_anchor(QtWidgets.QComboBox(), 'eb.depth.type')
         self.cmb_type.addItems(["JET (经典)", "Rainbow (彩虹)", "Ironbow (铁黑)", "Guofeng 国风 (默认)"])
         self.cmb_type.setCurrentIndex(3)
         self.cmb_type.currentIndexChanged.connect(self._emit)
@@ -219,8 +224,8 @@ class ColormapControlPanel(QtWidgets.QWidget):
         L.addWidget(self.sld_dmax[0]); L.addLayout(self._slider_row(self.sld_dmax))
 
         # Near/Far
-        self.spn_near = QtWidgets.QSpinBox(); self.spn_near.setRange(0, 10000); self.spn_near.setValue(0); self.spn_near.setSuffix(" mm")
-        self.spn_far = QtWidgets.QSpinBox(); self.spn_far.setRange(0, 10000); self.spn_far.setValue(4000); self.spn_far.setSuffix(" mm")
+        self.spn_near = _help_anchor(QtWidgets.QSpinBox(), 'eb.depth.near'); self.spn_near.setRange(0, 10000); self.spn_near.setValue(0); self.spn_near.setSuffix(" mm")
+        self.spn_far = _help_anchor(QtWidgets.QSpinBox(), 'eb.depth.far'); self.spn_far.setRange(0, 10000); self.spn_far.setValue(4000); self.spn_far.setSuffix(" mm")
         self.spn_near.valueChanged.connect(self._emit)
         self.spn_far.valueChanged.connect(self._emit)
         L.addWidget(QtWidgets.QLabel("物理距离范围"))
@@ -229,7 +234,7 @@ class ColormapControlPanel(QtWidgets.QWidget):
         L.addWidget(row_nf)
 
         # Reset button
-        btn_reset = QtWidgets.QPushButton("重置为国风默认")
+        btn_reset = _help_anchor(QtWidgets.QPushButton("重置为国风默认"), 'eb.depth.reset')
         btn_reset.clicked.connect(self._reset_defaults)
         L.addWidget(btn_reset)
 
@@ -238,7 +243,7 @@ class ColormapControlPanel(QtWidgets.QWidget):
     def _make_slider(self, label, min_v, max_v, default, tooltip):
         lbl = QtWidgets.QLabel(label)
         lbl.setToolTip(tooltip)
-        sld = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        sld = _help_anchor(QtWidgets.QSlider(QtCore.Qt.Horizontal), 'eb.depth.' + {'混合度': 'mix', '亮度': 'brightness', '对比度': 'contrast', '深度范围Min': 'dmin', '深度范围Max': 'dmax'}[label])
         sld.setRange(min_v, max_v)
         sld.setValue(default)
         sld.setToolTip(tooltip)
@@ -417,10 +422,13 @@ class Win(QtWidgets.QMainWindow):
         subtitle.setObjectName("studio_subtitle")
         branding.addWidget(subtitle)
         top.addLayout(branding, 1)
-        self.theme_button = QtWidgets.QToolButton()
+        self.theme_button = _help_anchor(QtWidgets.QToolButton(), 'ui.theme')
         self.theme_button.clicked.connect(self._toggle_theme)
         self._update_theme_button()
         top.addWidget(self.theme_button)
+        self.learning_button = _help_anchor(QtWidgets.QPushButton("帮助 · 新手入门"), "ui.help")
+        self.learning_button.clicked.connect(lambda: self.learning.open_center(courses=True))
+        top.addWidget(self.learning_button)
         main_layout.addWidget(self.header)
 
         self.navigation = SectionNavigation()
@@ -436,7 +444,7 @@ class Win(QtWidgets.QMainWindow):
 
         # ---- Docks ----
         # Right dock: Runtime + Colormap
-        d = QtWidgets.QDockWidget("Runtime / 色彩控制", self)
+        d = _help_anchor(QtWidgets.QDockWidget("Runtime / 色彩控制", self), 'eb.runtime')
         d.setObjectName("dock_runtime_colormap")
         d.setMinimumWidth(245)
         self._runtime_dock = d
@@ -445,20 +453,20 @@ class Win(QtWidgets.QMainWindow):
         f.setSpacing(8)
 
         # Runtime status
-        self.prompt = QtWidgets.QLineEdit(self.sam.prompt)
+        self.prompt = _help_anchor(QtWidgets.QLineEdit(self.sam.prompt), 'eb.sam.prompt')
         self.prompt.editingFinished.connect(lambda: setattr(self.sam, "prompt", self.prompt.text().strip()))
-        self.clip_frames = QtWidgets.QSpinBox(); self.clip_frames.setRange(5, 120); self.clip_frames.setValue(self.sam.clip_frames)
+        self.clip_frames = _help_anchor(QtWidgets.QSpinBox(), 'eb.sam.frames'); self.clip_frames.setRange(5, 120); self.clip_frames.setValue(self.sam.clip_frames)
         self.clip_frames.valueChanged.connect(lambda v: setattr(self.sam, "clip_frames", int(v)))
-        self.clip_fps = QtWidgets.QSpinBox(); self.clip_fps.setRange(10, 60); self.clip_fps.setValue(self.sam.clip_fps)
+        self.clip_fps = _help_anchor(QtWidgets.QSpinBox(), 'eb.sam.fps'); self.clip_fps.setRange(10, 60); self.clip_fps.setValue(self.sam.clip_fps)
         self.clip_fps.valueChanged.connect(lambda v: setattr(self.sam, "clip_fps", int(v)))
 
-        self.status = QtWidgets.QPlainTextEdit()
+        self.status = _help_anchor(QtWidgets.QPlainTextEdit(), 'eb.runtime.status')
         self.status.setReadOnly(True)
         self.status.setMaximumHeight(200)
 
-        b = QtWidgets.QPushButton("重新开始 UP0 校准")
+        b = _help_anchor(QtWidgets.QPushButton("重新开始 UP0 校准"), 'eb.pose.start')
         b.clicked.connect(lambda: self._cal_ui_call(self.pose_cal.start))
-        h = QtWidgets.QPushButton("检查 SAM3")
+        h = _help_anchor(QtWidgets.QPushButton("检查 SAM3"), 'eb.sam.health')
         h.clicked.connect(self.check_health)
 
         f.addWidget(QtWidgets.QLabel("SAM3 Prompt")); f.addWidget(self.prompt)
@@ -472,7 +480,7 @@ class Win(QtWidgets.QMainWindow):
         f.addWidget(self.colormap_panel)
 
         # Brush serial reconnection panel
-        self.brush_panel = QtWidgets.QGroupBox("毛笔串口重连")
+        self.brush_panel = _help_anchor(QtWidgets.QGroupBox("毛笔串口重连"), 'eb.serial')
         self.brush_panel.setStyleSheet("font-weight:600; font-size:12px;")
         bl = QtWidgets.QVBoxLayout(self.brush_panel)
         bl.setContentsMargins(8, 8, 8, 8)
@@ -499,10 +507,10 @@ class Win(QtWidgets.QMainWindow):
         row = QtWidgets.QWidget()
         rh = QtWidgets.QHBoxLayout(row)
         rh.setContentsMargins(0, 0, 0, 0)
-        self.btn_brush_reconnect = QtWidgets.QPushButton("手动重连")
+        self.btn_brush_reconnect = _help_anchor(QtWidgets.QPushButton("手动重连"), 'eb.reconnect')
         self.btn_brush_reconnect.clicked.connect(self._manual_brush_reconnect)
         self.btn_brush_reconnect.setMinimumHeight(28)
-        self.chk_auto_reconnect = QtWidgets.QCheckBox("自动重连")
+        self.chk_auto_reconnect = _help_anchor(QtWidgets.QCheckBox("自动重连"), 'eb.auto_reconnect')
         self.chk_auto_reconnect.setChecked(True)
         self.chk_auto_reconnect.toggled.connect(self._toggle_auto_reconnect)
         rh.addWidget(self.btn_brush_reconnect)
@@ -522,7 +530,7 @@ class Win(QtWidgets.QMainWindow):
         # Left dock: a compact, scrollable mapping editor. The previous
         # QFormLayout placed three large spinboxes beside a long label and
         # forced this dock to steal half of the central viewport.
-        md = QtWidgets.QDockWidget("映射快捷调试", self)
+        md = _help_anchor(QtWidgets.QDockWidget("映射快捷调试", self), 'eb.mapping')
         md.setObjectName("dock_mapper_debug")
         md.setMinimumWidth(245)
         self._mapper_dock = md
@@ -532,16 +540,16 @@ class Win(QtWidgets.QMainWindow):
         mf.setSpacing(8)
         self.map_spins = []
         for group, label in (("board", "纸面坐标 XYZ °"), ("brush", "毛笔/安装 XYZ °")):
-            group_box = QtWidgets.QGroupBox(label)
+            group_box = _help_anchor(QtWidgets.QGroupBox(label), 'eb.map.' + group)
             group_layout = QtWidgets.QGridLayout(group_box)
             group_layout.setContentsMargins(6, 8, 6, 6)
             group_layout.setHorizontalSpacing(4)
             arr = self.mapper_debug.board_deg if group == "board" else self.mapper_debug.brush_deg
             for i, axis in enumerate("XYZ"):
-                axis_label = QtWidgets.QLabel(axis)
+                axis_label = _help_anchor(QtWidgets.QLabel(axis), "eb.map." + group + "." + axis)
                 axis_label.setAlignment(QtCore.Qt.AlignCenter)
                 group_layout.addWidget(axis_label, 0, i)
-                sp = QtWidgets.QDoubleSpinBox()
+                sp = _help_anchor(QtWidgets.QDoubleSpinBox(), 'eb.map.' + group + '.' + axis)
                 sp.setRange(-180, 180)
                 sp.setDecimals(2)
                 sp.setSingleStep(0.5)
@@ -553,18 +561,18 @@ class Win(QtWidgets.QMainWindow):
                 self.map_spins.append((group, i, sp))
             mf.addWidget(group_box)
         mf.addWidget(QtWidgets.QLabel("版本名称"))
-        self.map_name = QtWidgets.QLineEdit()
+        self.map_name = _help_anchor(QtWidgets.QLineEdit(), 'eb.map.name')
         self.map_name.setPlaceholderText("例如：校准_01")
         mf.addWidget(self.map_name)
         mf.addWidget(QtWidgets.QLabel("历史版本"))
-        self.map_versions = QtWidgets.QComboBox()
+        self.map_versions = _help_anchor(QtWidgets.QComboBox(), 'eb.map.versions')
         mf.addWidget(self.map_versions)
         self._refresh_versions()
-        bs = QtWidgets.QPushButton("保存映射版本")
+        bs = _help_anchor(QtWidgets.QPushButton("保存映射版本"), 'eb.map.save')
         bs.clicked.connect(self._save_mapping)
-        bl = QtWidgets.QPushButton("加载 / 回退所选版本")
+        bl = _help_anchor(QtWidgets.QPushButton("加载 / 回退所选版本"), 'eb.map.load')
         bl.clicked.connect(self._load_mapping)
-        brs = QtWidgets.QPushButton("重置调试修正")
+        brs = _help_anchor(QtWidgets.QPushButton("重置调试修正"), 'eb.map.reset')
         brs.clicked.connect(self._reset_mapping)
         for btn in (bs, bl, brs):
             mf.addWidget(btn)
@@ -615,6 +623,9 @@ class Win(QtWidgets.QMainWindow):
         self.statusBar().showMessage("E-Brush 负责设备采集和数据交接；训练由 RC Studio 独立执行")
 
         # Timer
+        from learning_support.integration import install as install_learning
+        self.learning = install_learning(self)
+
         self.t = QtCore.QTimer()
         self.t.timeout.connect(self.tick)
         self.t.start(16)
@@ -650,6 +661,8 @@ class Win(QtWidgets.QMainWindow):
         for axis in (self.val.plot.getAxis("left"), self.val.plot.getAxis("bottom")):
             axis.setPen(c["text"])
             axis.setTextPen(c["text"])
+        if hasattr(self, "learning"):
+            self.learning.set_theme(self._theme_mode)
 
     def _probe_rcstudio(self):
         """Optional explicit GET request to localhost; never sends a command."""
@@ -684,6 +697,7 @@ class Win(QtWidgets.QMainWindow):
             return
         try:
             save_manifest(source, destination, self._last_quality)
+            self._learning_last_handoff = destination  # Success, not the export button click.
             self.handoff_panel.show_export(destination, source)
             self.agent.event("data_handoff_manifest", source=source, destination=destination)
             self.agent.publish("handoff", {"manifest": destination, "source": source,
@@ -870,9 +884,12 @@ class Win(QtWidgets.QMainWindow):
             self.state['pose'] = None
             self._last_display_token = None
 
-        self.calui.update_state(self.pose_cal.state())
+        self._learning_pose_state = self.pose_cal.state()
+
+        self.calui.update_state(self._learning_pose_state)
         self.hallui.update_data(self.state.get("hall"))
-        self.hallcalui.update_state(self.hall_cal.state())
+        self._learning_hall_state = self.hall_cal.state()
+        self.hallcalui.update_state(self._learning_hall_state)
 
         # Camera → SAM3
         c = self.state["camera"]
@@ -996,7 +1013,8 @@ class Win(QtWidgets.QMainWindow):
                     "reference_state": self.pose.reference_state,
                     "heading_absolute": False,
                 }
-            self.calui.update_state(self.pose_cal.state())
+            self._learning_pose_state = self.pose_cal.state()
+            self.calui.update_state(self._learning_pose_state)
             return result
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "UP0 姿态校准", str(e))
@@ -1008,11 +1026,12 @@ class Win(QtWidgets.QMainWindow):
     def _hall_ui_call(self, callback, *args):
         try:
             result = callback(*args)
-            self.hallcalui.update_state(self.hall_cal.state())
+            self._learning_hall_state = self.hall_cal.state()
+            self.hallcalui.update_state(self._learning_hall_state)
             self._refresh_hall_profiles()
             if isinstance(result, dict) and result.get("status") == "UNVERIFIED_BASELINE":
                 QtWidgets.QMessageBox.warning(self, "恢复原始映射",
-                    "已恢复未标定的原始 Hall 安装方向。该方向仅用于安全回退，并非通过外参验证的解。")
+                    "已恢复初始 Hall 安装方向，仅供安全回退；正式使用请加载通过独立验证的外参。")
             return result
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "霍尔外参标定", str(e))
@@ -1081,6 +1100,8 @@ class Win(QtWidgets.QMainWindow):
             self.status.setPlainText("SAM3 health ERROR: " + repr(e))
 
     def closeEvent(self, e):
+        if hasattr(self, "learning"):
+            self.learning.shutdown()
         self._settings.setValue("ui/geometry", self.saveGeometry())
         self._settings.setValue("ui/docks", self.saveState())
         self._settings.setValue("ui/layout_mode", self.workspace.mode)

@@ -1,0 +1,10 @@
+WARNING: The directory '/home/oai/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+Processing /mnt/data/studio_learning/rcstudio/Reservoir-Computing-Studio-main
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: rcstudio-local
+  Building wheel for rcstudio-local (pyproject.toml): started
+  Building wheel for rcstudio-local (pyproject.toml): finished with status 'done'
+  Created wheel for rcstudio-local: filename=rcstudio_local-0.4.0-py3-none-any.whl size=109927 sha256=5d5167b2563a358bb8f1fc9d3e1e0f555f973ca129bfc4150a3812fafebb271f
+  Stored in directory: /tmp/pip-ephem-wheel-cache-eliuwg8h/wheels/9b/dd/e2/399e3c0d54bf0b40d0628dd271ccf4ff407a7fa624f57fbda0
+Successfully built rcstudio-local

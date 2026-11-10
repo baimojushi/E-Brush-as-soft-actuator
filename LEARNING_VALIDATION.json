@@ -1,0 +1,94 @@
+{
+  "release_date": "2026-11-10",
+  "ebrush": {
+    "release": "1.2 Learning",
+    "tests_passed": 154,
+    "qt_module_skipped": 1,
+    "help_topics": 109,
+    "courses": 7,
+    "course_steps": 44,
+    "owned_control_constructor_sites": 78,
+    "changed_existing_files": [
+      "README.md",
+      "studio/hall_extrinsic_ui.py",
+      "studio/hall_panel.py",
+      "studio/main.py",
+      "studio/pose_calibration_ui.py",
+      "studio/research_panels.py",
+      "studio/responsive_workspace.py",
+      "studio/rgbd_live_gui.py",
+      "studio/sam3_production_panel.py",
+      "studio/studio_sections.py"
+    ],
+    "missing_existing_files": [],
+    "unchanged_existing_files": 206
+  },
+  "rcstudio": {
+    "release": "0.4 Learning",
+    "tests_passed": 80,
+    "subtests_passed": 6,
+    "qt_module_skipped": 1,
+    "help_topics": 39,
+    "courses": 5,
+    "course_steps": 37,
+    "owned_control_constructor_sites": 28,
+    "changed_existing_files": [
+      "README_CN.md",
+      "pyproject.toml",
+      "rcstudio/__init__.py",
+      "rcstudio/gui.py"
+    ],
+    "missing_existing_files": [],
+    "unchanged_existing_files": 23
+  },
+  "total_tests_passed": 234,
+  "total_subtests_passed": 6,
+  "native_qt_validation": "NOT RUN: PySide6 is not installed; two GUI test modules explicitly skipped.",
+  "windows_hardware_dpi_validation": "NOT RUN: target-machine acceptance required.",
+  "wheel_package_data_check": "PASS: RC wheel includes catalog.json, courses.json and implementation.",
+  "compiled_python_files": {
+    "studio": 77,
+    "rcstudio": 19
+  },
+  "regression_scope": {
+    "ebrush": [
+      "learning_tests",
+      "studio/tests/test_research_ui_contracts.py",
+      "tests/test_python.py"
+    ],
+    "rcstudio": [
+      "tests",
+      "learning_tests"
+    ]
+  },
+  "rc_uploads_have_identical_content": true,
+  "baselines": {
+    "ebrush_upload": {
+      "filename": "E-Brush-as-soft-actuator-main.zip",
+      "sha256": "234bdd04a101edb5aa4a380971de6c9b40b19e8a0c11a011a4912af46119e765"
+    },
+    "rc_latest_upload": {
+      "filename": "Reservoir-Computing-Studio-main (1).zip",
+      "sha256": "402262850690a670c851abac628c31145b631f9f710e7f8c9f06ae6796086985"
+    },
+    "rc_original_upload": {
+      "filename": "Reservoir-Computing-Studio-main.zip",
+      "sha256": "402262850690a670c851abac628c31145b631f9f710e7f8c9f06ae6796086985"
+    },
+    "rc_preserved_v0_3": {
+      "filename": "RCStudio-v0.3-EBrush-Material3.zip",
+      "sha256": "03b4f5ddd7313b964120d9d9b0150818aec4267ce32c9f57c562728a7ca4f1c7"
+    }
+  },
+  "notes": [
+    "148 help entries are distributed across both apps, including shared general topics.",
+    "106 bound constructor sites expand into more runtime widgets through loops.",
+    "Existing E-Brush camera/firmware/data-processing modules and RC training/service/core modules remain byte-identical to their selected baselines.",
+    "Static coverage is not a guarantee of native GUI rendering, OS dialogs, third-party internal menus, accessibility or high-DPI behavior.",
+    "No real device operations or live experimental-training claim is made by these learning tests."
+  ],
+  "final_test_summaries": {
+    "ebrush": "154 passed, 1 skipped in 1.21s",
+    "rcstudio": "80 passed, 1 skipped, 6 subtests passed in 1.48s"
+  }
+}

@@ -3,6 +3,11 @@
 Both panels intentionally have no dependency on RC Studio's training code.
 """
 from __future__ import annotations
+
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
 import time
 from PySide6 import QtCore, QtWidgets
 
@@ -54,7 +59,7 @@ class AcquisitionQualityPanel(QtWidgets.QWidget):
         self.details = QtWidgets.QLabel("等待状态计数")
         self.details.setWordWrap(True)
         layout.addWidget(self.details)
-        layout.addWidget(_caption("200 Hz 是设备设计目标，不是软件保证的实测频率。UI 轮询不会被误计为采样次数。"))
+        layout.addWidget(_caption("200 Hz 是设备设计目标。请以实测接收率验证实际频率；UI 轮询与设备采样分别统计。"))
         layout.addStretch()
 
     def update_snapshot(self, data):
@@ -85,7 +90,7 @@ class AgentAuditPanel(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(_heading("Agent 操作记录"))
         layout.addWidget(_caption("显示 E-Brush 本地控制接口最近的操作事件；训练和模型操作不属于本服务"))
-        self.entries = QtWidgets.QPlainTextEdit()
+        self.entries = _help_anchor(QtWidgets.QPlainTextEdit(), 'eb.view.audit')
         self.entries.setReadOnly(True)
         layout.addWidget(self.entries, 1)
         self._last_key = None
@@ -118,7 +123,7 @@ class RCStudioHandoffPanel(QtWidgets.QWidget):
         layout.setSpacing(14)
         layout.addWidget(_heading("E-Brush → RC Studio 数据交接"))
         layout.addWidget(_caption("两套独立应用 · 无内嵌训练 · 无串口共享 · 不写入 RC Studio 数据库"))
-        ownership = QtWidgets.QGroupBox("责任边界")
+        ownership = _help_anchor(QtWidgets.QGroupBox("责任边界"), 'eb.view.handoff')
         owners = QtWidgets.QVBoxLayout(ownership)
         text = QtWidgets.QLabel(
             "E-Brush Studio：负责设备、传感器、实时采集、标定、原始日志与移交清单。\n\n"
@@ -129,9 +134,9 @@ class RCStudioHandoffPanel(QtWidgets.QWidget):
         owners.addWidget(text)
         layout.addWidget(ownership)
         actions = QtWidgets.QHBoxLayout()
-        self.btn_probe = QtWidgets.QPushButton("检查 RC Studio（GET 只读）")
+        self.btn_probe = _help_anchor(QtWidgets.QPushButton("检查 RC Studio（GET 只读）"), 'eb.handoff.probe')
         self.btn_probe.clicked.connect(self.probeRequested.emit)
-        self.btn_export = QtWidgets.QPushButton("生成数据移交清单…")
+        self.btn_export = _help_anchor(QtWidgets.QPushButton("生成数据移交清单…"), 'eb.handoff.export')
         self.btn_export.setObjectName("primary_action")
         self.btn_export.clicked.connect(self.exportRequested.emit)
         actions.addWidget(self.btn_probe)
@@ -140,12 +145,12 @@ class RCStudioHandoffPanel(QtWidgets.QWidget):
         self.service = QtWidgets.QLabel("RC Studio 127.0.0.1:8766 · 未检查")
         self.service.setWordWrap(True)
         layout.addWidget(self.service)
-        self.export_info = QtWidgets.QPlainTextEdit()
+        self.export_info = _help_anchor(QtWidgets.QPlainTextEdit(), 'eb.handoff.info')
         self.export_info.setReadOnly(True)
         self.export_info.setPlaceholderText("移交记录（仅本地 JSON 元数据；不会上传、训练或修改原始日志）")
         self.export_info.setMaximumHeight(200)
         layout.addWidget(self.export_info)
-        layout.addWidget(_caption("生成清单后，请在 RC Studio 使用其现有导入接口处理 .brlog 或 CSV；清单不是训练数据文件。"))
+        layout.addWidget(_caption("生成清单后，请在 RC Studio 导入 .brlog 或 CSV 原始文件；清单提供数据路径与校验信息。"))
         layout.addStretch()
 
     def show_probe(self, result):

@@ -1,4 +1,9 @@
 from __future__ import annotations
+
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
 import math, json
 import numpy as np
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -120,7 +125,7 @@ class HallPanel(QtWidgets.QWidget):
             q.setWordWrap(True)
             q.setMinimumWidth(0)
             self.labels[key]=q; self.form.addRow(label,q)
-        self.detail=QtWidgets.QPlainTextEdit(); self.detail.setReadOnly(True)
+        self.detail=_help_anchor(QtWidgets.QPlainTextEdit(), 'eb.view.hall'); self.detail.setReadOnly(True)
         L.addWidget(title); L.addWidget(self.preview); L.addLayout(self.form); L.addWidget(self.detail)
 
     def resizeEvent(self, event):

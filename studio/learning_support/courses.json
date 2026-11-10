@@ -1,0 +1,531 @@
+{
+  "version": 1,
+  "courses": [
+    {
+      "id": "eb_intro",
+      "title": "01 · 零硬件认识工作台",
+      "description": "通过界面导航学习功能区和职责边界；标定、重连与训练在对应课程中单独操作。",
+      "prerequisites": "无硬件即可；主工作台可用 --camera-backend none --no-brush 预览。",
+      "steps": [
+        {
+          "id": "welcome",
+          "title": "先认识两个 Studio",
+          "help": "ui.help",
+          "target": "ui.help",
+          "instruction": "E-Brush 负责采集与标定，RC 负责离线训练。本课程只切换界面和检查理解，不会替你动硬件。将鼠标停在任一控件上，或用 Tab 后按 F1。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "theme",
+          "title": "亲手切换一次主题",
+          "help": "ui.theme",
+          "target": "ui.theme",
+          "instruction": "点击主窗口的浅色/深色按钮一次，观察说明浮窗也跟随配色改变。",
+          "gate": "event",
+          "check": "检测到主题按钮被你点击。",
+          "event": "ui.theme.clicked"
+        },
+        {
+          "id": "layout",
+          "title": "选择适合你的布局",
+          "help": "eb.layout",
+          "target": "eb.layout",
+          "instruction": "展开工作区布局选择器，主动选择单列、双列、自动或标签模式。这个动作只改变显示。",
+          "gate": "event",
+          "check": "检测到布局选项的主动选择。",
+          "event": "eb.layout.changed"
+        },
+        {
+          "id": "sensor",
+          "title": "进入传感器页",
+          "help": "eb.nav.sensors",
+          "target": "eb.nav.sensors",
+          "instruction": "点击顶端“传感器”导航。只切换面板，不会新增一个设备连接。",
+          "gate": "event",
+          "check": "请完成提示中的实际操作。",
+          "event": "eb.nav.sensors.clicked"
+        },
+        {
+          "id": "rate",
+          "title": "分清接收率与显示刷新",
+          "help": "eb.quality.rate",
+          "target": "eb.quality.rate",
+          "instruction": "采集质量的 Hz 来自解码器接收计数，动画刷新次数是另一件事。看到 200 Hz 设计目标时，哪种理解正确？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "它是设计目标，要用真实接收计数验证。",
+            "只要 GUI 每秒刷新 200 次就说明没有丢帧。"
+          ],
+          "correct": 0,
+          "feedback": "GUI 刷新用于显示；面板根据成功解析的数据帧计数估计传感器接收率。"
+        },
+        {
+          "id": "camera",
+          "title": "认识相机的三个视角",
+          "help": "eb.nav.camera",
+          "target": "eb.nav.camera",
+          "instruction": "点击“相机”导航，分别认识彩色、深度和掩膜。无相机预览时空白是正常的。",
+          "gate": "event",
+          "check": "请完成提示中的实际操作。",
+          "event": "eb.nav.camera.clicked"
+        },
+        {
+          "id": "boundary",
+          "title": "训练应该在哪里进行？",
+          "help": "eb.view.handoff",
+          "target": "eb.view.handoff",
+          "instruction": "采集完成后，要训练 EBrush Motion Predictor V1，应该在哪个软件操作？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "在独立 RC Studio 导入并提交训练。",
+            "在 E-Brush 中直接接管 RC 的数据库并训练。"
+          ],
+          "correct": 0,
+          "feedback": "E-Brush 只采集、标定与交接，训练是 RC Studio 的职责。"
+        },
+        {
+          "id": "done",
+          "title": "把说明固定下来",
+          "help": "ui.help",
+          "target": "ui.help",
+          "instruction": "按 F1 可以把控件说明固定到学习中心，也可以搜索缩写或参数名。完成本课程后，如需进行真实采集，请继续完成硬件验收。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        }
+      ]
+    },
+    {
+      "id": "eb_quality",
+      "title": "02 · 检查真实设备数据",
+      "description": "学习连接、接收计数与传感器有效性；如需重新连接，请由使用者主动操作。",
+      "prerequisites": "需要已经连接且正常输出 BRUSH-V1 DATA 的设备；暂时没有设备时可将本步标记为“跳过”，待真实设备就绪后再验收。",
+      "steps": [
+        {
+          "id": "serial",
+          "title": "先核对端口状态",
+          "help": "eb.serial",
+          "target": "eb.serial",
+          "instruction": "查看串口面板。若异常，请先检查线缆、端口和启动配置；只有确认需要时才自己使用重连按钮。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "data",
+          "title": "等待真实 DATA 流",
+          "help": "eb.view.quality",
+          "target": "eb.view.quality",
+          "instruction": "观察累计解码帧数增加。教程只读取现有质量快照，不再开一个串口。",
+          "gate": "predicate",
+          "check": "connected 与 streaming 均为真。",
+          "predicate": "device.streaming"
+        },
+        {
+          "id": "imu",
+          "title": "确认惯性数据有效且新鲜",
+          "help": "eb.quality.imu",
+          "target": "eb.quality.imu",
+          "instruction": "保持连接并查看 IMU 状态；如果无效，请先解决采集问题，待数据有效后再分析姿态。",
+          "gate": "predicate",
+          "check": "当前质量快照明确报告 IMU 有效 / 新鲜。",
+          "predicate": "device.imu_fresh"
+        },
+        {
+          "id": "gap",
+          "title": "缺口率为零意味着什么？",
+          "help": "eb.quality.loss",
+          "target": "eb.quality.loss",
+          "instruction": "当前窗口帧编号没有缺口时，能直接得出哪项结论？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "本窗口没有观察到编号缺口，仍需检查有效性与精度。",
+            "姿态、磁场和笔尖位置已经完全准确。"
+          ],
+          "correct": 0,
+          "feedback": "编号连续只反映一个传输质量方面，不能证明物理精度。"
+        },
+        {
+          "id": "hall",
+          "title": "单独判断 Hall 通道",
+          "help": "eb.quality.hall",
+          "target": "eb.quality.hall",
+          "instruction": "Hall 与 IMU 的有效性分开判断。当前 RC 运动预测只用惯性通道，霍尔标定则需要可靠磁场数据。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "record",
+          "title": "确认录制入口，不编造按钮",
+          "help": "eb.view.handoff",
+          "target": "eb.view.handoff",
+          "instruction": "当前主姿态工作台没有在本轮新增原始 .brlog 录制按钮。请使用项目已有录制入口准备完成写入的日志；独立 RGB-D 窗口有它自己的开始/停止归档流程。随后再学习数据交接。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        }
+      ]
+    },
+    {
+      "id": "eb_pose",
+      "title": "03 · 按真实状态完成姿态校准",
+      "description": "讲解 UP0/R0、方向验证和保存门控。教程绝不代按人工确认。",
+      "prerequisites": "真实 IMU 数据有效；明确纸面 +X/+Y；能够辨认笔上的 R0 标记。",
+      "steps": [
+        {
+          "id": "definition",
+          "title": "先把 UP0 摆放说清楚",
+          "help": "eb.view.pose",
+          "target": "eb.view.pose",
+          "instruction": "UP0 是笔尖向下、笔杆竖直，R0 朝纸面 +X（书写者右侧）。这里不会自动点击“开始”。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "manual",
+          "title": "哪一项必须由人确认？",
+          "help": "eb.pose.confirm",
+          "target": "eb.pose.confirm",
+          "instruction": "六轴 IMU 可以辅助检查重力方向和静止，但不能识别笔上的标记。哪一项需要目视确认？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "R0 标记是否朝纸面 +X。",
+            "软件必须自动识别所有标记，所以人不用看。"
+          ],
+          "correct": 0,
+          "feedback": "R0 的绝对朝向在当前方案中需要人工确认，教学也不能代替。"
+        },
+        {
+          "id": "start",
+          "title": "主动开始，并按提示放笔架",
+          "help": "eb.pose.start",
+          "target": "eb.pose.start",
+          "instruction": "由你点击“开始校准”，按业务面板提示完成静止和取笔。教程观察当前校准会话，不触发采集。",
+          "gate": "predicate",
+          "check": "当前业务阶段已不再是 IDLE；沿用既有会话时也会明确显示该阶段。",
+          "predicate": "pose.started"
+        },
+        {
+          "id": "up0",
+          "title": "人工确认并等待 UP_R0 锁定",
+          "help": "eb.pose.confirm",
+          "target": "eb.pose.confirm",
+          "instruction": "阶段到 UP_R0 时确认真实摆放，主动按 R0 确认，稳定保持。请根据实际标记方向完成确认，教学进度应与真实操作一致。",
+          "gate": "predicate",
+          "check": "本校准会话记录了人工确认且 up_r0_locked 通过。",
+          "predicate": "pose.up0",
+          "warning": "教学的下一步不会替代业务按钮。"
+        },
+        {
+          "id": "directions",
+          "title": "完成 X/Y/轴向旋转验证",
+          "help": "eb.pose.steps",
+          "target": "eb.pose.steps",
+          "instruction": "按面板要求向 +X、+Y 倾斜，并在笔杆近竖直时绕轴旋转。等待业务验证，不使用强行跳步。",
+          "gate": "predicate",
+          "check": "业务 can_commit 为真或当前会话已保存。",
+          "predicate": "pose.ready"
+        },
+        {
+          "id": "review",
+          "title": "复核并命名",
+          "help": "eb.pose.details",
+          "target": "eb.pose.details",
+          "instruction": "阅读结果与 limitations。需要保存时填写明确版本名，确认这一安装和参考对应本次采集。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "save",
+          "title": "由你接受并保存",
+          "help": "eb.pose.save",
+          "target": "eb.pose.save",
+          "instruction": "只有业务允许保存时才主动保存。教程读取 COMMITTED 状态，不替你写配置。",
+          "gate": "predicate",
+          "check": "当前业务会话阶段为 COMMITTED。",
+          "predicate": "pose.saved"
+        },
+        {
+          "id": "limits",
+          "title": "保留正确的结论范围",
+          "help": "eb.pose.details",
+          "target": "eb.pose.details",
+          "instruction": "通过本流程不表示已验证绝对航向、绝对滚转或毫米级笔尖位置。记录版本、安装条件和后续独立验证。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        }
+      ]
+    },
+    {
+      "id": "eb_hall",
+      "title": "04 · 霍尔外参：采样、求解、独立验证",
+      "description": "区分训练姿态和未参与求解的验证姿态，尊重磁场假设。",
+      "prerequisites": "已锁定 UP_R0；磁场在测量区域近似静止、均匀；有真实有效 Hall 数据。",
+      "steps": [
+        {
+          "id": "assumption",
+          "title": "先判断磁环境",
+          "help": "eb.view.hallcal",
+          "target": "eb.view.hallcal",
+          "instruction": "附近有随毛笔一起移动的强磁铁时，应该怎样处理？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "先检查或改善条件，不能默认满足均匀静磁场假设。",
+            "只要多采几次同一姿态就一定可以标定。"
+          ],
+          "correct": 0,
+          "feedback": "运动磁源会破坏当前求解假设，采样数量不能替代建模条件。"
+        },
+        {
+          "id": "start",
+          "title": "由你开始新会话",
+          "help": "eb.hallcal.start",
+          "target": "eb.hallcal.start",
+          "instruction": "确认参考和磁环境后主动开始。围绕尽量固定的空间位置改变朝向。",
+          "gate": "predicate",
+          "check": "霍尔业务进入 COLLECT/VALIDATE/READY/COMMITTED 中的一个阶段。",
+          "predicate": "hall.started"
+        },
+        {
+          "id": "train",
+          "title": "收集不同方向的训练姿态",
+          "help": "eb.hallcal.capture",
+          "target": "eb.hallcal.capture",
+          "instruction": "每换一个方向先稳定，再主动采集。静止约 0.75 秒；请采集足够多的独立姿态，并确保角度分布符合要求。",
+          "gate": "predicate",
+          "check": "当前会话 train_count 至少 8。",
+          "predicate": "hall.training"
+        },
+        {
+          "id": "solve",
+          "title": "主动求解候选外参",
+          "help": "eb.hallcal.solve",
+          "target": "eb.hallcal.solve",
+          "instruction": "按钮可用时由你求解，查看候选矩阵和训练诊断。若激励不足，改善姿态分布。",
+          "gate": "predicate",
+          "check": "当前会话存在候选外参。",
+          "predicate": "hall.candidate"
+        },
+        {
+          "id": "validate",
+          "title": "使用独立姿态验证",
+          "help": "eb.hallcal.report",
+          "target": "eb.hallcal.report",
+          "instruction": "求解后再采至少 3 个未参与求解的姿态。必须以业务验证结果为准。",
+          "gate": "predicate",
+          "check": "业务 can_commit 为真或当前会话已保存。",
+          "predicate": "hall.ready"
+        },
+        {
+          "id": "save",
+          "title": "复核后接受并保存",
+          "help": "eb.hallcal.save",
+          "target": "eb.hallcal.save",
+          "instruction": "检查新旧 RMS、验证结论和安装版本名。由你主动保存，教学不接受候选。",
+          "gate": "predicate",
+          "check": "霍尔会话阶段为 COMMITTED。",
+          "predicate": "hall.saved"
+        },
+        {
+          "id": "done",
+          "title": "记录适用条件",
+          "help": "eb.hallcal.report",
+          "target": "eb.hallcal.report",
+          "instruction": "外参描述安装关系，磁场环境与姿态参考仍影响验证。传感器重新安装后，请依据新的安装条件重新检查外参有效性。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        }
+      ]
+    },
+    {
+      "id": "eb_handoff",
+      "title": "05 · 将采集数据交接给 RC",
+      "description": "认识只读探测、移交清单和原始文件关系。",
+      "prerequisites": "有已停止写入的 .brlog 或 CSV；真实训练还需要多份独立录制。",
+      "steps": [
+        {
+          "id": "ownership",
+          "title": "谁拥有硬件？",
+          "help": "eb.view.handoff",
+          "target": "eb.view.handoff",
+          "instruction": "交接数据后，哪种做法符合两个软件的职责？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "E-Brush 继续拥有设备，RC 只读离线文件并研究。",
+            "RC 同时打开同一个串口，与 E-Brush 竞争数据。"
+          ],
+          "correct": 0,
+          "feedback": "RC Studio 接收的是采集文件及元信息；设备控制权始终由 E-Brush 持有。"
+        },
+        {
+          "id": "probe",
+          "title": "可选的只读服务检查",
+          "help": "eb.handoff.probe",
+          "target": "eb.handoff.probe",
+          "instruction": "RC 已启动时可主动检查。E-Brush 可以独立生成文件清单，之后再由 RC Studio 导入；本步阅读不强迫你开启服务。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "manifest",
+          "title": "清单里是否包含全部采样数据？",
+          "help": "eb.handoff.export",
+          "target": "eb.handoff.export",
+          "instruction": "准备把资料交给 RC 时，应该保留哪些东西？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "清单和清单引用的原始数据文件。",
+            "只保留 JSON，删除原始日志也可以训练。"
+          ],
+          "correct": 0,
+          "feedback": "JSON 清单不复制原始采样数据；源文件必须可访问且内容与哈希相符。"
+        },
+        {
+          "id": "export",
+          "title": "由你生成移交清单",
+          "help": "eb.handoff.export",
+          "target": "eb.handoff.export",
+          "instruction": "主动点击，先选已结束写入的原始日志，再选清单保存位置。取消选择不算完成。",
+          "gate": "predicate",
+          "check": "本次程序会话确实成功生成过清单。",
+          "predicate": "handoff.saved"
+        },
+        {
+          "id": "verify",
+          "title": "检查移交路径",
+          "help": "eb.handoff.info",
+          "target": "eb.handoff.info",
+          "instruction": "核对清单路径与原始文件路径。源文件发生变化后，请重新生成清单并完成哈希核验，保留变更记录。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "rc",
+          "title": "到独立 RC Studio 继续",
+          "help": "eb.view.handoff",
+          "target": "eb.view.handoff",
+          "instruction": "在 RC Studio 选择 EBrush Motion Predictor V1，导入清单，再核对片段和独立记录。学习“真实数据交接”课程，不在 E-Brush 内重复实现训练。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        }
+      ]
+    },
+    {
+      "id": "eb_color",
+      "title": "06 · 只改显示，不改测量",
+      "description": "用深度色彩设置理解显示层与物理数据的区别。",
+      "prerequisites": "可无相机阅读；观察实际显示变化需要有效深度图。",
+      "steps": [
+        {
+          "id": "view",
+          "title": "认识深度图",
+          "help": "eb.view.depth",
+          "target": "eb.view.depth",
+          "instruction": "彩色图表示外观，深度图伪彩表示距离映射。本课调整只影响显示。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "color",
+          "title": "试选一种色图",
+          "help": "eb.depth.type",
+          "target": "eb.depth.type",
+          "instruction": "主动选择一种色图，观察图层风格或当前选项变化。",
+          "gate": "event",
+          "check": "请完成提示中的实际操作。",
+          "event": "eb.depth.type.changed"
+        },
+        {
+          "id": "mix",
+          "title": "混合度表示什么？",
+          "help": "eb.depth.mix",
+          "target": "eb.depth.mix",
+          "instruction": "混合度从 100 改到 50，实际改变的是哪项？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "伪彩与灰度的混合比例。",
+            "传感器融合中 IMU 与视觉的权重。"
+          ],
+          "correct": 0,
+          "feedback": "混合度是显示参数，和传感器融合权重无关。"
+        },
+        {
+          "id": "range",
+          "title": "区分百分比与毫米",
+          "help": "eb.depth.near",
+          "target": "eb.depth.near",
+          "instruction": "哪个设置使用毫米单位？",
+          "gate": "quiz",
+          "check": "选出最符合说明的答案。",
+          "answers": [
+            "物理距离的近 / 远。",
+            "归一化深度 Min / Max 百分比。"
+          ],
+          "correct": 0,
+          "feedback": "near/far 是毫米，Min/Max 是归一化区间百分比。"
+        },
+        {
+          "id": "reset",
+          "title": "了解重置的准确含义",
+          "help": "eb.depth.reset",
+          "target": "eb.depth.reset",
+          "instruction": "重置按钮会把近远范围设为 100/850 mm，而启动值可能是 0/4000。需要恢复时再主动点击，不必为了完成课程强行改变原设置。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        }
+      ]
+    },
+    {
+      "id": "eb_rgbd",
+      "title": "独立 RGB-D 窗口 · 采集与归档",
+      "description": "只用于独立 RGB-D 入口；识别前置验证和安全收尾。",
+      "prerequisites": "独立 RGB-D 窗口已按项目参数启动；配准、深度单位和时间单位经过确认。",
+      "steps": [
+        {
+          "id": "prep",
+          "title": "采集前核对",
+          "help": "eb.rgbd.start",
+          "target": "eb.rgbd.start",
+          "instruction": "核对标定文件、输出目录、深度和时间单位。教学不会替你传入 registration-verified。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "start",
+          "title": "主动开始采集",
+          "help": "eb.rgbd.start",
+          "target": "eb.rgbd.start",
+          "instruction": "确认硬件不被其他程序占用后，由你开始。",
+          "gate": "predicate",
+          "check": "该窗口 recorder 已建立且处于可采集状态。",
+          "predicate": "rgbd.recording"
+        },
+        {
+          "id": "status",
+          "title": "阅读状态",
+          "help": "eb.rgbd.status",
+          "target": "eb.rgbd.status",
+          "instruction": "画面可见用于确认预览正常；深度配准和跨传感器同步还需单独验收。SAM3 结果是候选。",
+          "gate": "read",
+          "check": "勾选阅读确认后继续。"
+        },
+        {
+          "id": "stop",
+          "title": "主动停止并等待收尾",
+          "help": "eb.rgbd.stop",
+          "target": "eb.rgbd.stop",
+          "instruction": "按“停止并归档”，等待后台完成；需要停止时请先使用软件内的正常停止操作。",
+          "gate": "predicate",
+          "check": "本轮教学观察到采集后，stop_done 已完成、收尾结束，且未报告采集完整性或归档错误。",
+          "predicate": "rgbd.stopped"
+        }
+      ]
+    }
+  ]
+}

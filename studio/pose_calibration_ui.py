@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
+
 import json
 from PySide6 import QtCore, QtWidgets
 
@@ -43,7 +48,7 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
             ("ROLL_TEST", "06  轴向旋转 / 自动验证"),
             ("REVIEW", "07  复核 / 保存结果"),
         )
-        self.steps = QtWidgets.QListWidget()
+        self.steps = _help_anchor(QtWidgets.QListWidget(), 'eb.pose.steps')
         self.steps.setObjectName("calibration_stepper")
         self.steps.setFocusPolicy(QtCore.Qt.NoFocus)
         self.steps.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
@@ -52,7 +57,7 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         for _, title in self.step_names:
             self.steps.addItem("○ " + title)
         self._last_step = None
-        self.progress = QtWidgets.QProgressBar()
+        self.progress = _help_anchor(QtWidgets.QProgressBar(), 'eb.pose.progress')
         self.progress.setRange(0, 100)
 
         # Long action labels previously occupied a single 700+ px row,
@@ -61,15 +66,15 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         row = QtWidgets.QGridLayout()
         row.setHorizontalSpacing(5)
         row.setVerticalSpacing(5)
-        self.start_button = QtWidgets.QPushButton("开始校准")
+        self.start_button = _help_anchor(QtWidgets.QPushButton("开始校准"), 'eb.pose.start')
         self.start_button.clicked.connect(self.startRequested.emit)
-        self.up0_button = QtWidgets.QPushButton("确认 R0 朝 +X，开始采集 UP0")
+        self.up0_button = _help_anchor(QtWidgets.QPushButton("确认 R0 朝 +X，开始采集 UP0"), 'eb.pose.confirm')
         self.up0_button.clicked.connect(self.confirmUp0Requested.emit)
-        self.next_button = QtWidgets.QPushButton("下一步（不可跳过验证）")
+        self.next_button = _help_anchor(QtWidgets.QPushButton("下一步（不可跳过验证）"), 'eb.pose.next')
         self.next_button.clicked.connect(self.advanceRequested.emit)
-        self.retry_button = QtWidgets.QPushButton("重试当前步骤")
+        self.retry_button = _help_anchor(QtWidgets.QPushButton("重试当前步骤"), 'eb.pose.retry')
         self.retry_button.clicked.connect(self.retryRequested.emit)
-        self.cancel_button = QtWidgets.QPushButton("取消校准")
+        self.cancel_button = _help_anchor(QtWidgets.QPushButton("取消校准"), 'eb.pose.cancel')
         self.cancel_button.clicked.connect(self.cancelRequested.emit)
         self.up0_button.setText("确认 R0 朝 +X，采集 UP0")
         self.next_button.setText("下一步（自动验证）")
@@ -85,9 +90,9 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         row.setColumnStretch(1, 1)
 
         save = QtWidgets.QGridLayout()
-        self.name = QtWidgets.QLineEdit()
+        self.name = _help_anchor(QtWidgets.QLineEdit(), 'eb.pose.name')
         self.name.setPlaceholderText("映射配置名称")
-        self.commit = QtWidgets.QPushButton("验证通过后保存")
+        self.commit = _help_anchor(QtWidgets.QPushButton("验证通过后保存"), 'eb.pose.save')
         self.commit.clicked.connect(lambda: self.commitRequested.emit(self.name.text().strip()))
         save.addWidget(self.name, 0, 0)
         save.addWidget(self.commit, 0, 1)
@@ -95,15 +100,15 @@ class PoseCalibrationPanel(QtWidgets.QWidget):
         save.setColumnStretch(1, 1)
 
         versions = QtWidgets.QGridLayout()
-        self.profiles = QtWidgets.QComboBox()
-        self.load = QtWidgets.QPushButton("加载 / 回退")
+        self.profiles = _help_anchor(QtWidgets.QComboBox(), 'eb.pose.profiles')
+        self.load = _help_anchor(QtWidgets.QPushButton("加载 / 回退"), 'eb.pose.load')
         self.load.clicked.connect(lambda: self.loadRequested.emit(self.profiles.currentText()))
         versions.addWidget(self.profiles, 0, 0)
         versions.addWidget(self.load, 0, 1)
         versions.setColumnStretch(0, 2)
         versions.setColumnStretch(1, 1)
 
-        self.detail = QtWidgets.QPlainTextEdit()
+        self.detail = _help_anchor(QtWidgets.QPlainTextEdit(), 'eb.pose.details')
         self.detail.setReadOnly(True)
         self.detail.setMinimumHeight(100)
         for w in (self.title, self.definition, self.steps, self.stage, self.msg, self.progress):

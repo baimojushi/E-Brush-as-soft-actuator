@@ -1,5 +1,10 @@
 """Chinese UI for versioned Hall→Brush extrinsic calibration."""
 from __future__ import annotations
+
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
 import json
 from PySide6 import QtWidgets, QtCore
 
@@ -26,7 +31,7 @@ class HallExtrinsicPanel(QtWidgets.QWidget):
             "先在“姿态映射校准”完成 UP_R0 参考锁定。"
             "在尽量固定的空间位置旋转毛笔，每改变一个朝向后静止采样。")
         self.hint.setWordWrap(True)
-        self.progress=QtWidgets.QProgressBar()
+        self.progress=_help_anchor(QtWidgets.QProgressBar(), 'eb.hallcal.progress')
         self.progress.setRange(0,11)
         self.train=QtWidgets.QLabel("训练：0 / 8")
         self.val=QtWidgets.QLabel("独立验证：0 / 3")
@@ -38,9 +43,9 @@ class HallExtrinsicPanel(QtWidgets.QWidget):
         self.pending.setWordWrap(True)
 
         sample_bar=QtWidgets.QGridLayout()
-        self.start=QtWidgets.QPushButton("开始新标定")
-        self.capture=QtWidgets.QPushButton("采集当前静止姿态")
-        self.undo=QtWidgets.QPushButton("撤销上次")
+        self.start=_help_anchor(QtWidgets.QPushButton("开始新标定"), 'eb.hallcal.start')
+        self.capture=_help_anchor(QtWidgets.QPushButton("采集当前静止姿态"), 'eb.hallcal.capture')
+        self.undo=_help_anchor(QtWidgets.QPushButton("撤销上次"), 'eb.hallcal.undo')
         for b,sig in [(self.start,self.startRequested),(self.capture,self.captureRequested),(self.undo,self.undoRequested)]:
             b.clicked.connect(sig.emit)
             b.setMinimumWidth(0)
@@ -51,8 +56,8 @@ class HallExtrinsicPanel(QtWidgets.QWidget):
         sample_bar.setColumnStretch(1, 1)
 
         action_bar=QtWidgets.QGridLayout()
-        self.solve=QtWidgets.QPushButton("求解候选外参")
-        self.cancel=QtWidgets.QPushButton("取消会话")
+        self.solve=_help_anchor(QtWidgets.QPushButton("求解候选外参"), 'eb.hallcal.solve')
+        self.cancel=_help_anchor(QtWidgets.QPushButton("取消会话"), 'eb.hallcal.cancel')
         self.solve.clicked.connect(self.solveRequested.emit)
         self.cancel.clicked.connect(self.cancelRequested.emit)
         action_bar.addWidget(self.solve, 0, 0)
@@ -62,12 +67,12 @@ class HallExtrinsicPanel(QtWidgets.QWidget):
 
         # Place version selector vertically: no wide form-label column.
         versions=QtWidgets.QVBoxLayout()
-        self.name=QtWidgets.QLineEdit()
+        self.name=_help_anchor(QtWidgets.QLineEdit(), 'eb.hallcal.name')
         self.name.setPlaceholderText("例如：hall_good_01（可留空自动命名）")
-        self.commit=QtWidgets.QPushButton("验证通过 → 接受并保存")
+        self.commit=_help_anchor(QtWidgets.QPushButton("验证通过 → 接受并保存"), 'eb.hallcal.save')
         self.commit.clicked.connect(lambda:self.commitRequested.emit(self.name.text().strip()))
-        self.profile=QtWidgets.QComboBox()
-        self.rollback=QtWidgets.QPushButton("加载 / 回退选中版本")
+        self.profile=_help_anchor(QtWidgets.QComboBox(), 'eb.hallcal.profiles')
+        self.rollback=_help_anchor(QtWidgets.QPushButton("加载 / 回退选中版本"), 'eb.hallcal.load')
         self.rollback.clicked.connect(lambda:self.loadRequested.emit(str(self.profile.currentData())))
         version_row=QtWidgets.QGridLayout()
         version_row.addWidget(self.profile, 0, 0)
@@ -80,7 +85,7 @@ class HallExtrinsicPanel(QtWidgets.QWidget):
         versions.addWidget(QtWidgets.QLabel("历史版本"))
         versions.addLayout(version_row)
 
-        self.report=QtWidgets.QPlainTextEdit()
+        self.report=_help_anchor(QtWidgets.QPlainTextEdit(), 'eb.hallcal.report')
         self.report.setReadOnly(True)
         self.report.setPlaceholderText("这里将显示训练与独立验证结果。")
         self.report.setMinimumHeight(120)

@@ -1,3 +1,13 @@
+# E-Brush Studio V1.2 Learning
+
+新增悬停全文帮助、F1 学习中心与新手实操课程。先阅读 [本轮使用与验收说明](LEARNING_GUIDE_CN.md)。
+
+**本轮验证边界：已完成纯数据/状态机/回归测试，原生 Qt 与 Windows 实机验收仍待完成。**
+
+---
+
+以下保留原版本说明与启动信息。
+
 # E-Brush C3 -> S3 wireless split, 2.0 (prototype)
 
 **BLE is the default. Wi-Fi is a separate recovery firmware target, not a

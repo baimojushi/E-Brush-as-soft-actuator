@@ -7,6 +7,11 @@ hidden, a tab is selected or the window is resized.
 """
 from __future__ import annotations
 
+try:
+    from .learning_support import anchor as _help_anchor
+except ImportError:
+    from learning_support import anchor as _help_anchor
+
 from PySide6 import QtCore, QtWidgets
 
 from layout_utils import column_count, forced_minimum_width
@@ -51,31 +56,31 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         controls.setContentsMargins(4, 0, 4, 0)
         controls.setSpacing(8)
         controls.addWidget(QtWidgets.QLabel("视图布局"))
-        self.mode_combo = QtWidgets.QComboBox()
+        self.mode_combo = _help_anchor(QtWidgets.QComboBox(), 'eb.layout')
         for key, label in self.MODES:
             self.mode_combo.addItem(label, userData=key)
         self.mode_combo.setToolTip("自动分栏按可用宽度布局；双列过窄时可横向滚动；标签聚焦只显示当前面板")
         self.mode_combo.currentIndexChanged.connect(self._mode_changed)
         controls.addWidget(self.mode_combo)
 
-        self.all_button = QtWidgets.QPushButton("全部")
+        self.all_button = _help_anchor(QtWidgets.QPushButton("全部"), 'eb.layout.all')
         self.all_button.clicked.connect(lambda: self.select_views(range(len(self.views))))
         controls.addWidget(self.all_button)
-        self.sensor_button = QtWidgets.QPushButton("传感器")
+        self.sensor_button = _help_anchor(QtWidgets.QPushButton("传感器"), 'eb.layout.sensors')
         self.sensor_button.clicked.connect(lambda: self.select_named_views(["采集质量", "三维场景", "霍尔磁通"]))
         controls.addWidget(self.sensor_button)
-        self.calibration_button = QtWidgets.QPushButton("标定")
+        self.calibration_button = _help_anchor(QtWidgets.QPushButton("标定"), 'eb.layout.calibration')
         self.calibration_button.clicked.connect(lambda: self.select_named_views(["姿态映射校准", "霍尔外参标定", "三维场景"]))
         controls.addWidget(self.calibration_button)
         controls.addStretch(1)
         self.layout_info = QtWidgets.QLabel("")
         self.layout_info.setObjectName("studio_caption")
         controls.addWidget(self.layout_info)
-        self.sidebar_button = QtWidgets.QPushButton("隐藏侧栏")
+        self.sidebar_button = _help_anchor(QtWidgets.QPushButton("隐藏侧栏"), 'eb.sidebars')
         self.sidebar_button.setToolTip("临时收起左右工具栏，扩大中央视图；再次点击恢复")
         self.sidebar_button.clicked.connect(self.sidebarToggleRequested.emit)
         controls.addWidget(self.sidebar_button)
-        self.reset_button = QtWidgets.QPushButton("重置布局")
+        self.reset_button = _help_anchor(QtWidgets.QPushButton("重置布局"), 'eb.layout.reset')
         self.reset_button.setToolTip("恢复自动分栏、默认窗口位置和左右工具栏")
         self.reset_button.clicked.connect(self.resetLayoutRequested.emit)
         controls.addWidget(self.reset_button)
@@ -98,7 +103,7 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         strip_layout.setContentsMargins(2, 1, 2, 1)
         strip_layout.setSpacing(6)
         for index, (name, _) in enumerate(self.views):
-            button = QtWidgets.QToolButton()
+            button = _help_anchor(QtWidgets.QToolButton(), {'采集质量': 'eb.view.quality', '彩色图像': 'eb.view.rgb', '深度图': 'eb.view.depth', 'SAM3 掩膜叠加': 'eb.view.mask', 'IMU ↔ 视觉验证': 'eb.view.validation', '三维场景': 'eb.view.scene', '霍尔磁通': 'eb.view.hall', '姿态映射校准': 'eb.view.pose', '霍尔外参标定': 'eb.view.hallcal', 'Agent 操作审计': 'eb.view.audit', 'RC Studio 数据交接': 'eb.view.handoff'}[name])
             button.setText(name)
             button.setCheckable(True)
             button.setChecked(True)
@@ -126,7 +131,7 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         self.grid_scroll.setWidget(self.grid_content)
         root.addWidget(self.grid_scroll, 1)
 
-        self.tabs = QtWidgets.QTabWidget()
+        self.tabs = _help_anchor(QtWidgets.QTabWidget(), 'ui.tabs')
         self.tabs.setObjectName("view_focus_tabs")
         self.tabs.setDocumentMode(True)
         self.tabs.setTabPosition(QtWidgets.QTabWidget.North)
@@ -141,7 +146,7 @@ class ResponsiveWorkspace(QtWidgets.QWidget):
         self.empty_label.hide()
 
         for index, (name, widget) in enumerate(self.views):
-            tile = QtWidgets.QGroupBox(name)
+            tile = _help_anchor(QtWidgets.QGroupBox(name), {'采集质量': 'eb.view.quality', '彩色图像': 'eb.view.rgb', '深度图': 'eb.view.depth', 'SAM3 掩膜叠加': 'eb.view.mask', 'IMU ↔ 视觉验证': 'eb.view.validation', '三维场景': 'eb.view.scene', '霍尔磁通': 'eb.view.hall', '姿态映射校准': 'eb.view.pose', '霍尔外参标定': 'eb.view.hallcal', 'Agent 操作审计': 'eb.view.audit', 'RC Studio 数据交接': 'eb.view.handoff'}[name])
             tile.setObjectName(f"view_tile_{index}")
             tile.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
             inner = QtWidgets.QVBoxLayout(tile)

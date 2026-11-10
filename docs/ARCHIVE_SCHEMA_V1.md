@@ -229,7 +229,7 @@
 
 TD `serial_bridge`（Script CHOP）可在演示/预演中作为**读取方**按本 schema 播放 episode（File In DAT + 表达式重建通道），但：
 - 生产端 = `host/brush_serial.py` 直出 CSV/JSON，**不经 TD**；
-- pose_mapper 的 `rx_deg/ry_deg/px_m` 等属于**运行时衍生通道**，不是归档字段；任何衍生量若要归档，必须在 episode.json 声明计算定义后另存衍生列，原始列不替换。
+- pose_mapper 的 `rx_deg/ry_deg/px_m` 等属于**运行时衍生通道**；归档字段由 episode.json 中的 schema 单独定义；任何衍生量若要归档，必须在 episode.json 声明计算定义后另存衍生列，原始列不替换。
 
 ## 9. 最小可解析示例与验收
 

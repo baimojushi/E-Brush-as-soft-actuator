@@ -68,7 +68,7 @@ class AcquisitionQualityMonitor:
         elif (hz is not None and hz < 150) or (loss_pct is not None and loss_pct > 1):
             severity, summary = "warning", "吞吐率或帧缺口需关注（200 Hz 为设计目标）"
         else:
-            severity, summary = "good", "当前观测正常；尚不等于通过硬件精度验证"
+            severity, summary = "good", "当前观测正常；硬件精度仍需专项测试"
         return {
             "schema": "ebrush.acquisition_quality.v1",
             "severity": severity, "summary": summary,
