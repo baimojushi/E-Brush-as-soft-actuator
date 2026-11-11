@@ -2,12 +2,12 @@
 from pathlib import Path
 from . import anchor
 
-VIEW_HELP = {'采集质量': 'eb.view.quality', '彩色图像': 'eb.view.rgb', '深度图': 'eb.view.depth', 'SAM3 掩膜叠加': 'eb.view.mask', 'IMU ↔ 视觉验证': 'eb.view.validation', '三维场景': 'eb.view.scene', '霍尔磁通': 'eb.view.hall', '姿态映射校准': 'eb.view.pose', '霍尔外参标定': 'eb.view.hallcal', 'Agent 操作审计': 'eb.view.audit', 'RC Studio 数据交接': 'eb.view.handoff'}
+VIEW_HELP = {'采集质量': 'eb.view.quality', '彩色图像': 'eb.view.rgb', '深度图': 'eb.view.depth', 'SAM3 掩膜叠加': 'eb.view.mask', 'IMU ↔ 视觉验证': 'eb.view.validation', '三维场景': 'eb.view.scene', '霍尔磁通': 'eb.view.hall', '姿态映射校准': 'eb.view.pose', '霍尔外参标定': 'eb.view.hallcal', 'Agent 操作审计': 'eb.view.audit', 'RC Studio 数据交接': 'eb.view.handoff', 'Agent 工作流': 'eb.view.agent'}
 VIEW_SECTIONS = {
     "quality": "sensors", "rgb": "camera", "depth": "camera", "mask": "camera",
     "validation": "diagnostics", "scene": "sensors", "hall": "sensors",
     "pose": "calibration", "hallcal": "calibration", "audit": "diagnostics",
-    "handoff": "handoff",
+    "handoff": "handoff", "agent": "workflow",
 }
 
 def evaluate(window, name, session):
