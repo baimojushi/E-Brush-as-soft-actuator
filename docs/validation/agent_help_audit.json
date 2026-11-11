@@ -1,0 +1,516 @@
+{
+  "scope": "Owned control constructor sites; inherited native children and custom canvas bindings use integration.py",
+  "kind": "static-source-audit-not-native-visual-acceptance",
+  "catalog_entries": 113,
+  "courses": 7,
+  "course_steps": 44,
+  "owned_control_constructor_sites": 81,
+  "missing": [],
+  "bindings": [
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 34,
+      "target": "QtWidgets.QProgressBar()",
+      "topic_expression": "'eb.hallcal.progress'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 46,
+      "target": "QtWidgets.QPushButton('开始新标定')",
+      "topic_expression": "'eb.hallcal.start'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 47,
+      "target": "QtWidgets.QPushButton('采集当前静止姿态')",
+      "topic_expression": "'eb.hallcal.capture'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 48,
+      "target": "QtWidgets.QPushButton('撤销上次')",
+      "topic_expression": "'eb.hallcal.undo'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 59,
+      "target": "QtWidgets.QPushButton('求解候选外参')",
+      "topic_expression": "'eb.hallcal.solve'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 60,
+      "target": "QtWidgets.QPushButton('取消会话')",
+      "topic_expression": "'eb.hallcal.cancel'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 70,
+      "target": "QtWidgets.QLineEdit()",
+      "topic_expression": "'eb.hallcal.name'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 72,
+      "target": "QtWidgets.QPushButton('验证通过 → 接受并保存')",
+      "topic_expression": "'eb.hallcal.save'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 74,
+      "target": "QtWidgets.QComboBox()",
+      "topic_expression": "'eb.hallcal.profiles'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 75,
+      "target": "QtWidgets.QPushButton('加载 / 回退选中版本')",
+      "topic_expression": "'eb.hallcal.load'"
+    },
+    {
+      "file": "studio/hall_extrinsic_ui.py",
+      "line": 88,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.hallcal.report'"
+    },
+    {
+      "file": "studio/hall_panel.py",
+      "line": 128,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.view.hall'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 176,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.view.validation'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 177,
+      "target": "pg.PlotWidget(title='IMU ↔ Vision shaft error')",
+      "topic_expression": "'eb.view.validation'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 201,
+      "target": "QtWidgets.QComboBox()",
+      "topic_expression": "'eb.depth.type'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 228,
+      "target": "QtWidgets.QSpinBox()",
+      "topic_expression": "'eb.depth.near'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 229,
+      "target": "QtWidgets.QSpinBox()",
+      "topic_expression": "'eb.depth.far'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 238,
+      "target": "QtWidgets.QPushButton('重置为国风默认')",
+      "topic_expression": "'eb.depth.reset'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 247,
+      "target": "QtWidgets.QSlider(QtCore.Qt.Horizontal)",
+      "topic_expression": "'eb.depth.' + {'混合度': 'mix', '亮度': 'brightness', '对比度': 'contrast', '深度范围Min': 'dmin', '深度范围Max': 'dmax'}[label]"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 391,
+      "target": "AgentWorkflowPanel()",
+      "topic_expression": "'eb.workflow.events'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 431,
+      "target": "QtWidgets.QToolButton()",
+      "topic_expression": "'ui.theme'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 435,
+      "target": "QtWidgets.QPushButton('帮助 · 新手入门')",
+      "topic_expression": "'ui.help'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 453,
+      "target": "QtWidgets.QDockWidget('Runtime / 色彩控制', self)",
+      "topic_expression": "'eb.runtime'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 462,
+      "target": "QtWidgets.QLineEdit(self.sam.prompt)",
+      "topic_expression": "'eb.sam.prompt'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 464,
+      "target": "QtWidgets.QSpinBox()",
+      "topic_expression": "'eb.sam.frames'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 466,
+      "target": "QtWidgets.QSpinBox()",
+      "topic_expression": "'eb.sam.fps'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 469,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.runtime.status'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 473,
+      "target": "QtWidgets.QPushButton('重新开始 UP0 校准')",
+      "topic_expression": "'eb.pose.start'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 475,
+      "target": "QtWidgets.QPushButton('检查 SAM3')",
+      "topic_expression": "'eb.sam.health'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 489,
+      "target": "QtWidgets.QGroupBox('毛笔串口重连')",
+      "topic_expression": "'eb.serial'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 516,
+      "target": "QtWidgets.QPushButton('手动重连')",
+      "topic_expression": "'eb.reconnect'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 519,
+      "target": "QtWidgets.QCheckBox('自动重连')",
+      "topic_expression": "'eb.auto_reconnect'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 539,
+      "target": "QtWidgets.QDockWidget('映射快捷调试', self)",
+      "topic_expression": "'eb.mapping'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 570,
+      "target": "QtWidgets.QLineEdit()",
+      "topic_expression": "'eb.map.name'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 574,
+      "target": "QtWidgets.QComboBox()",
+      "topic_expression": "'eb.map.versions'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 577,
+      "target": "QtWidgets.QPushButton('保存映射版本')",
+      "topic_expression": "'eb.map.save'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 579,
+      "target": "QtWidgets.QPushButton('加载 / 回退所选版本')",
+      "topic_expression": "'eb.map.load'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 581,
+      "target": "QtWidgets.QPushButton('重置调试修正')",
+      "topic_expression": "'eb.map.reset'"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 549,
+      "target": "QtWidgets.QGroupBox(label)",
+      "topic_expression": "'eb.map.' + group"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 555,
+      "target": "QtWidgets.QLabel(axis)",
+      "topic_expression": "'eb.map.' + group + '.' + axis"
+    },
+    {
+      "file": "studio/main.py",
+      "line": 558,
+      "target": "QtWidgets.QDoubleSpinBox()",
+      "topic_expression": "'eb.map.' + group + '.' + axis"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 51,
+      "target": "QtWidgets.QListWidget()",
+      "topic_expression": "'eb.pose.steps'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 60,
+      "target": "QtWidgets.QProgressBar()",
+      "topic_expression": "'eb.pose.progress'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 69,
+      "target": "QtWidgets.QPushButton('开始校准')",
+      "topic_expression": "'eb.pose.start'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 71,
+      "target": "QtWidgets.QPushButton('确认 R0 朝 +X，开始采集 UP0')",
+      "topic_expression": "'eb.pose.confirm'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 73,
+      "target": "QtWidgets.QPushButton('下一步（不可跳过验证）')",
+      "topic_expression": "'eb.pose.next'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 75,
+      "target": "QtWidgets.QPushButton('重试当前步骤')",
+      "topic_expression": "'eb.pose.retry'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 77,
+      "target": "QtWidgets.QPushButton('取消校准')",
+      "topic_expression": "'eb.pose.cancel'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 93,
+      "target": "QtWidgets.QLineEdit()",
+      "topic_expression": "'eb.pose.name'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 95,
+      "target": "QtWidgets.QPushButton('验证通过后保存')",
+      "topic_expression": "'eb.pose.save'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 103,
+      "target": "QtWidgets.QComboBox()",
+      "topic_expression": "'eb.pose.profiles'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 104,
+      "target": "QtWidgets.QPushButton('加载 / 回退')",
+      "topic_expression": "'eb.pose.load'"
+    },
+    {
+      "file": "studio/pose_calibration_ui.py",
+      "line": 111,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.pose.details'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 93,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.view.audit'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 126,
+      "target": "QtWidgets.QGroupBox('责任边界')",
+      "topic_expression": "'eb.view.handoff'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 137,
+      "target": "QtWidgets.QPushButton('检查 RC Studio（GET 只读）')",
+      "topic_expression": "'eb.handoff.probe'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 139,
+      "target": "QtWidgets.QPushButton('生成数据移交清单…')",
+      "topic_expression": "'eb.handoff.export'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 148,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.handoff.info'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 177,
+      "target": "QtWidgets.QProgressBar()",
+      "topic_expression": "'eb.workflow.progress'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 180,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.workflow.timeline'"
+    },
+    {
+      "file": "studio/research_panels.py",
+      "line": 182,
+      "target": "QtWidgets.QPushButton('紧急终止当前录制')",
+      "topic_expression": "'eb.workflow.abort'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 59,
+      "target": "QtWidgets.QComboBox()",
+      "topic_expression": "'eb.layout'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 66,
+      "target": "QtWidgets.QPushButton('全部')",
+      "topic_expression": "'eb.layout.all'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 69,
+      "target": "QtWidgets.QPushButton('传感器')",
+      "topic_expression": "'eb.layout.sensors'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 72,
+      "target": "QtWidgets.QPushButton('标定')",
+      "topic_expression": "'eb.layout.calibration'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 79,
+      "target": "QtWidgets.QPushButton('隐藏侧栏')",
+      "topic_expression": "'eb.sidebars'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 83,
+      "target": "QtWidgets.QPushButton('重置布局')",
+      "topic_expression": "'eb.layout.reset'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 134,
+      "target": "QtWidgets.QTabWidget()",
+      "topic_expression": "'ui.tabs'"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 106,
+      "target": "QtWidgets.QToolButton()",
+      "topic_expression": "{'采集质量': 'eb.view.quality', '彩色图像': 'eb.view.rgb', '深度图': 'eb.view.depth', 'SAM3 掩膜叠加': 'eb.view.mask', 'IMU ↔ 视觉验证': 'eb.view.validation', '三维场景': 'eb.view.scene', '霍尔磁通': 'eb.view.hall', '姿态映射校准': 'eb.view.pose', '霍尔外参标定': 'eb.view.hallcal', 'Agent 操作审计': 'eb.view.audit', 'RC Studio 数据交接': 'eb.view.handoff'}[name]"
+    },
+    {
+      "file": "studio/responsive_workspace.py",
+      "line": 149,
+      "target": "QtWidgets.QGroupBox(name)",
+      "topic_expression": "{'采集质量': 'eb.view.quality', '彩色图像': 'eb.view.rgb', '深度图': 'eb.view.depth', 'SAM3 掩膜叠加': 'eb.view.mask', 'IMU ↔ 视觉验证': 'eb.view.validation', '三维场景': 'eb.view.scene', '霍尔磁通': 'eb.view.hall', '姿态映射校准': 'eb.view.pose', '霍尔外参标定': 'eb.view.hallcal', 'Agent 操作审计': 'eb.view.audit', 'RC Studio 数据交接': 'eb.view.handoff'}[name]"
+    },
+    {
+      "file": "studio/rgbd_live_gui.py",
+      "line": 71,
+      "target": "QtWidgets.QPushButton('开始采集')",
+      "topic_expression": "'eb.rgbd.start'"
+    },
+    {
+      "file": "studio/rgbd_live_gui.py",
+      "line": 72,
+      "target": "QtWidgets.QPushButton('停止并归档')",
+      "topic_expression": "'eb.rgbd.stop'"
+    },
+    {
+      "file": "studio/rgbd_live_gui.py",
+      "line": 86,
+      "target": "QtWidgets.QPlainTextEdit()",
+      "topic_expression": "'eb.rgbd.status'"
+    },
+    {
+      "file": "studio/rgbd_live_gui.py",
+      "line": 98,
+      "target": "QtWidgets.QPushButton('帮助 · RGB-D 新手教学')",
+      "topic_expression": "'ui.help'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 35,
+      "target": "QtWidgets.QPushButton('选择视频并提交完整处理')",
+      "topic_expression": "'eb.sam.job.upload'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 39,
+      "target": "QtWidgets.QComboBox()",
+      "topic_expression": "'eb.sam.job.selector'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 42,
+      "target": "QtWidgets.QPushButton('失败续跑')",
+      "topic_expression": "'eb.sam.job.retry'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 47,
+      "target": "QtWidgets.QPushButton('暂停队列')",
+      "topic_expression": "'eb.sam.job.pause'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 50,
+      "target": "QtWidgets.QPushButton('打开结果目录')",
+      "topic_expression": "'eb.sam.job.directory'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 53,
+      "target": "QtWidgets.QPushButton('返回实时掩码')",
+      "topic_expression": "'eb.sam.job.live'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 57,
+      "target": "QtWidgets.QProgressBar()",
+      "topic_expression": "'eb.sam.job.progress'"
+    },
+    {
+      "file": "studio/sam3_production_panel.py",
+      "line": 63,
+      "target": "QtWidgets.QSlider(QtCore.Qt.Horizontal)",
+      "topic_expression": "'eb.sam.job.seek'"
+    },
+    {
+      "file": "studio/studio_sections.py",
+      "line": 47,
+      "target": "QtWidgets.QToolButton()",
+      "topic_expression": "'eb.nav.' + key"
+    }
+  ],
+  "notes": [
+    "Loop constructor sites expand to multiple runtime controls.",
+    "Form labels, metric cards and custom canvases are additionally bound in integration.py.",
+    "Concept-only topics and optional-entry topics need not have a visible widget in the main window.",
+    "OS file dialogs and third-party internal menus retain their native behavior.",
+    "Run LearningManager.coverage() and target-machine GUI acceptance for native runtime verification."
+  ]
+}

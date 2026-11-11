@@ -9,7 +9,7 @@ from PySide6 import QtCore, QtWidgets
 
 SECTIONS = (
     ("overview", "总览"), ("sensors", "传感器"), ("camera", "相机"),
-    ("calibration", "标定"), ("diagnostics", "诊断"), ("handoff", "RC 交接"),
+    ("calibration", "标定"), ("diagnostics", "诊断"), ("workflow", "Agent 流程"), ("handoff", "RC 交接"),
 )
 
 VIEW_PRESETS = {
@@ -19,6 +19,7 @@ VIEW_PRESETS = {
     "calibration": ("姿态映射校准", "霍尔外参标定", "三维场景"),
     "diagnostics": ("采集质量", "IMU ↔ 视觉验证", "Agent 操作审计"),
     "handoff": ("RC Studio 数据交接",),
+    "workflow": ("Agent 工作流", "Agent 操作审计", "采集质量"),
 }
 
 

@@ -8,6 +8,7 @@ import queue
 import struct
 import threading
 import time
+from pathlib import Path
 import zlib
 from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
@@ -374,7 +375,9 @@ class BrushSerial:
         self._write_lock = threading.Lock()
         self._sync_nonce = 0
         self._sync_sent: Dict[int, int] = {}
+        self._logger_lock = threading.RLock()
         self._logger = RawLogger(raw_log_path) if raw_log_path else None
+        self._recording_file = str(raw_log_path) if raw_log_path else None
 
     def start(self) -> None:
         if self._running:
@@ -389,12 +392,34 @@ class BrushSerial:
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-        if self._logger:
-            self._logger.close()
+        self.stop_recording()
         try:
             self.ser.close()
         except Exception:
             pass
+
+    def start_recording(self, path):
+        """Switch the log sink on the existing serial parser, under a writer lock."""
+        with self._logger_lock:
+            if not self._running or not self.ser.is_open:
+                raise RuntimeError("接收器尚未连接")
+            if self._logger is not None:
+                raise RuntimeError("已有采集会话正在录制")
+            file = Path(path).resolve()
+            file.parent.mkdir(parents=True, exist_ok=True)
+            if file.exists():
+                raise FileExistsError(str(file))
+            self._logger = RawLogger(str(file))
+            self._recording_file = str(file)
+            return {"path": str(file), "data_frames_at_start": int(self.stats.get("data_frames", 0))}
+
+    def stop_recording(self):
+        with self._logger_lock:
+            logger, self._logger = self._logger, None
+            path, self._recording_file = self._recording_file, None
+            if logger is not None:
+                logger.close()
+            return {"path": path, "data_frames": int(self.stats.get("data_frames", 0))}
 
     def _send(self, ptype: int, payload: bytes = b"") -> None:
         wire = build_packet(ptype, self._packet_seq_out, payload)
@@ -468,8 +493,9 @@ class BrushSerial:
                 continue
 
             host_rx_ns = time.perf_counter_ns()
-            if self._logger:
-                self._logger.write(host_rx_ns, wire)
+            with self._logger_lock:
+                if self._logger:
+                    self._logger.write(host_rx_ns, wire)
 
             try:
                 raw = cobs_decode(wire)

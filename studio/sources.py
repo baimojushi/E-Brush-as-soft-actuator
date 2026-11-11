@@ -398,6 +398,8 @@ class BrushSource:
         self._stop_reconnect = threading.Event()
         self._ever_connected = False
         self._reconnect_backoff = 1.0
+        self._recording_receiver = None
+        self._recording_start_frames = 0
 
     def _prepare_imports(self):
         path = str(self.root_dir / 'studio')
@@ -474,6 +476,39 @@ class BrushSource:
                     self._reconnect_backoff = min(self._reconnect_backoff * 1.5, 10.0)
                 # wait interruptibly so Close/Stop remains prompt
                 self._stop_reconnect.wait(self._reconnect_backoff)
+
+    def start_recording(self, path):
+        """Record from the active parser; reconnects never splice log files."""
+        with self._lock:
+            if self._recording_receiver is not None:
+                raise RuntimeError("采集正在进行")
+            receiver = self.bs
+            if not receiver or not receiver.ser.is_open or not receiver._running:
+                raise RuntimeError("设备尚未连接，无法录制")
+            before = receiver.start_recording(path)
+            self._recording_receiver = receiver
+            self._recording_start_frames = before["data_frames_at_start"]
+            return {"path": before["path"], "frames": 0}
+
+    def recording_status(self):
+        with self._lock:
+            receiver = self._recording_receiver
+            if receiver is None:
+                return {"active": False, "frames": 0}
+            connected = bool(receiver is self.bs and receiver.ser.is_open and receiver._running)
+            frames = max(0, int(receiver.stats.get("data_frames", 0)) - self._recording_start_frames)
+            return {"active": True, "connected": connected, "frames": frames,
+                    "interrupted": not connected}
+
+    def stop_recording(self):
+        with self._lock:
+            receiver, self._recording_receiver = self._recording_receiver, None
+            if receiver is None:
+                raise RuntimeError("当前没有录制会话")
+            stopped = receiver.stop_recording()
+            stopped["frames"] = max(0, stopped["data_frames"] - self._recording_start_frames)
+            stopped["interrupted"] = bool(receiver is not self.bs or not receiver._running)
+            return stopped
 
     def latest(self):
         with self._lock:

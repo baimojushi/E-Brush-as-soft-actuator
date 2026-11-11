@@ -14,7 +14,7 @@ def probe_rcstudio(*, port=8766, timeout=0.65):
         raise ValueError("Invalid local port")
     base = f"http://127.0.0.1:{port}"
     outcomes = []
-    for endpoint in ("/v1/state", "/health"):
+    for endpoint in ("/v1/health",):
         try:
             req = request.Request(base + endpoint, headers={"Accept": "application/json"}, method="GET")
             with request.urlopen(req, timeout=timeout) as response:
@@ -25,7 +25,7 @@ def probe_rcstudio(*, port=8766, timeout=0.65):
             except (ValueError, UnicodeError):
                 payload = {}
             text = json.dumps(payload, ensure_ascii=False).lower()
-            verified = isinstance(payload, dict) and ("rcstudio" in text or "rc studio" in text)
+            verified = isinstance(payload, dict) and payload.get("app") == "RCStudio" and payload.get("port_role") == "rc_training_only"
             return {"reachable": True, "verified": verified, "endpoint": endpoint,
                     "http_status": code,
                     "message": "检测到 RC Studio 标识（只读）" if verified else "检测到 HTTP 服务，但未验证为 RC Studio；不执行任何写操作"}

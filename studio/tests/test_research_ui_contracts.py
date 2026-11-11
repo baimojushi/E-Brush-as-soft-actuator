@@ -110,7 +110,7 @@ class _TestHTTP(BaseHTTPRequestHandler):
     request_methods = []
     def do_GET(self):
         self.request_methods.append("GET")
-        content = b'{"name":"RCStudio","status":"ok"}'
+        content = b'{"app":"RCStudio","port_role":"rc_training_only"}'
         self.send_response(200)
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()

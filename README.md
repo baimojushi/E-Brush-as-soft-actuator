@@ -1,3 +1,13 @@
+# E-Brush Studio V1.3 · Agent 设备采集与工作流展示
+
+E-Brush Studio 新增了经令牌授权的本机采集 API、独立 `.brlog` 录制启停、SHA-256 交接清单、质量门控、Agent 事件时间线以及本地紧急终止录制。通过 `workflow_id` 与 RC Studio V0.5 的研究工作流对应，原有设备、相机和标定由 E-Brush 统一管理。
+
+**从这里开始：** [双 Studio Agent 工作流使用说明](docs/AGENT_WORKFLOW_QUICKSTART_CN.md)。接入电子毛笔后执行 `START_AGENT_LIVE.ps1 -BrushPort COM7`；仅体验布局时继续使用 `START_UI_PREVIEW.ps1`。首次启动会在 `runtime/agent_credentials.json` 创建本机授权信息，供 RC Studio 使用。
+
+> 已完成模拟笔端与 RC 的 HTTP 工作流自动化联调。真实 COM、原生 PySide6 窗口和 Windows 多屏显示需在目标机器上验收。下文保留固件、传感器和原有实验平台的实施说明。
+
+---
+
 # E-Brush Studio V1.2 Learning
 
 新增悬停全文帮助、F1 学习中心与新手实操课程。先阅读 [本轮使用与验收说明](LEARNING_GUIDE_CN.md)。

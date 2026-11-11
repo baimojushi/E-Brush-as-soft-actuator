@@ -1,3 +1,9 @@
+# Agent 自动化扩展 · 更新说明
+
+本轮新增工作流时间线与悬停帮助，详情请先阅读 [Agent 工作流快速入门](docs/AGENT_WORKFLOW_QUICKSTART_CN.md)。下方为原有学习系统课程与验收说明。
+
+---
+
 # E-Brush Studio V1.2.1 · 悬停帮助与新手教学（文案修订）
 
 ## 本轮交付

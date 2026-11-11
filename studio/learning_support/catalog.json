@@ -1764,6 +1764,71 @@
       "scope": "E-Brush Studio 负责设备、采集、姿态与霍尔标定、原始数据及移交清单；模型训练和实验数据库属于独立 RC Studio。",
       "source": "rgbd_live_gui.py:tick",
       "keywords": ""
+    },
+    "eb.workflow.timeline": {
+      "title": "Agent 工作流执行时间线",
+      "category": "Agent 自动化",
+      "summary": "按照工作流标识展示采集、数据交接与 RC 训练阶段。每条消息包含明确的阶段、状态、时间与操作提示。",
+      "steps": [
+        "打开 E-Brush 的 Agent 流程页面，查看最新工作流状态。",
+        "需要了解当前阶段时，停留鼠标阅读详情或按 F1。"
+      ],
+      "explanation": "按照工作流标识展示采集、数据交接与 RC 训练阶段。每条消息包含明确的阶段、状态、时间与操作提示。 例如，操作员确认开始后，将依次显示开始录制、原始日志关闭、SHA-256 数据交接以及 RC 训练进度。",
+      "example": "例如，操作员确认开始后，将依次显示开始录制、原始日志关闭、SHA-256 数据交接以及 RC 训练进度。",
+      "pitfalls": "核对设备连接、采样质量和工作流标识；采集时需要在 RC Studio 确认操作员准备状态。",
+      "risk": "实际采样前确认设备处于安全状态，并保留原始日志与摘要记录。",
+      "scope": "E-Brush 负责硬件、录制与交接；RC Studio 负责训练、基线和模型评估。",
+      "source": "studio/acquisition_session.py; studio/research_panels.py; studio/agent_control.py",
+      "keywords": "workflow agent 时间线 采集 训练 数据交接"
+    },
+    "eb.workflow.progress": {
+      "title": "Agent 流程进度条",
+      "category": "Agent 自动化",
+      "summary": "显示整个跨软件工作流的完成比例。完成比例来自已完成阶段和训练任务上报的进度。",
+      "steps": [
+        "打开 E-Brush 的 Agent 流程页面，查看最新工作流状态。",
+        "需要了解当前阶段时，停留鼠标阅读详情或按 F1。"
+      ],
+      "explanation": "显示整个跨软件工作流的完成比例。完成比例来自已完成阶段和训练任务上报的进度。 采集阶段约占前半部分；数据导入、训练及评估会逐步推进直至完成。",
+      "example": "采集阶段约占前半部分；数据导入、训练及评估会逐步推进直至完成。",
+      "pitfalls": "核对设备连接、采样质量和工作流标识；采集时需要在 RC Studio 确认操作员准备状态。",
+      "risk": "实际采样前确认设备处于安全状态，并保留原始日志与摘要记录。",
+      "scope": "E-Brush 负责硬件、录制与交接；RC Studio 负责训练、基线和模型评估。",
+      "source": "studio/acquisition_session.py; studio/research_panels.py; studio/agent_control.py",
+      "keywords": "workflow agent 时间线 采集 训练 数据交接"
+    },
+    "eb.workflow.events": {
+      "title": "Agent 流程消息",
+      "category": "Agent 自动化",
+      "summary": "按时间展示近期步骤及其结果，方便了解目前正在发生的动作和接下来的人工操作。",
+      "steps": [
+        "打开 E-Brush 的 Agent 流程页面，查看最新工作流状态。",
+        "需要了解当前阶段时，停留鼠标阅读详情或按 F1。"
+      ],
+      "explanation": "按时间展示近期步骤及其结果，方便了解目前正在发生的动作和接下来的人工操作。 如果出现数据质量或网络异常，请核对具体阶段和异常说明。",
+      "example": "如果出现数据质量或网络异常，请核对具体阶段和异常说明。",
+      "pitfalls": "核对设备连接、采样质量和工作流标识；采集时需要在 RC Studio 确认操作员准备状态。",
+      "risk": "实际采样前确认设备处于安全状态，并保留原始日志与摘要记录。",
+      "scope": "E-Brush 负责硬件、录制与交接；RC Studio 负责训练、基线和模型评估。",
+      "source": "studio/acquisition_session.py; studio/research_panels.py; studio/agent_control.py",
+      "keywords": "workflow agent 时间线 采集 训练 数据交接"
+    },
+    "eb.workflow.abort": {
+      "title": "紧急终止 Agent 原始日志录制",
+      "category": "Agent 自动化",
+      "summary": "在 RC Studio 连接中断或操作员需要结束采集时，从 E-Brush 本地界面关闭当前日志写入。",
+      "steps": [
+        "确认正在运行的工作流 ID 与录制状态。",
+        "点击终止并确认，原始日志会保留以便调查。",
+        "返回 RC Studio 检查工作流状态并决定是否重新采集。"
+      ],
+      "explanation": "该按钮直接作用于 E-Brush 的唯一串口接收器日志写入器。它会关闭本次原始记录，并标记为已中止，保护设备和文件生命周期。",
+      "example": "训练主程序意外关闭后，E-Brush 仍在录制；使用这个按钮立即保存局部数据并结束当前会话。",
+      "pitfalls": "中止记录用于诊断。新实验请重新创建采集会话并完成完整的数据质量检查。",
+      "risk": "该操作会结束当前录制，请先确认现场动作已安全停止。",
+      "scope": "仅控制 E-Brush 原始采集日志；RC Studio 的训练任务由其工作流取消操作管理。",
+      "source": "studio/main.py:_abort_agent_recording; studio/acquisition_session.py",
+      "keywords": "Agent abort emergency stop 终止 日志"
     }
   }
 }

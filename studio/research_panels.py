@@ -158,3 +158,55 @@ class RCStudioHandoffPanel(QtWidgets.QWidget):
 
     def show_export(self, filename, source):
         self.export_info.setPlainText(f"清单已保存：{filename}\n原始数据：{source}\n未复制、转换或上传数据；未触发 RC 训练。")
+
+
+class AgentWorkflowPanel(QtWidgets.QWidget):
+    """Material-inspired workflow timeline sourced from local AgentControl."""
+    abortRequested = QtCore.Signal()
+    def __init__(self):
+        super().__init__()
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+        layout.addWidget(_heading("Agent 工作流 · 实时执行时间线"))
+        layout.addWidget(_caption(
+            "E-Brush 显示采集、标定和数据移交的现场状态；RC Studio 负责工作流审批、导入、训练与指标。"
+            "每一次录制都需要操作员确认已做好准备。"))
+        self.current = _heading("等待 Agent 工作流", "metric_value")
+        layout.addWidget(self.current)
+        self.progress = _help_anchor(QtWidgets.QProgressBar(), 'eb.workflow.progress')
+        self.progress.setRange(0, 100)
+        layout.addWidget(self.progress)
+        self.timeline = _help_anchor(QtWidgets.QPlainTextEdit(), 'eb.workflow.timeline')
+        self.timeline.setReadOnly(True)
+        self.abort_button = _help_anchor(QtWidgets.QPushButton("紧急终止当前录制"), 'eb.workflow.abort')
+        self.abort_button.setObjectName("danger_action")
+        self.abort_button.clicked.connect(self.abortRequested.emit)
+        self.abort_button.setEnabled(False)
+        layout.addWidget(self.abort_button)
+        self.timeline.setMinimumHeight(270)
+        layout.addWidget(self.timeline, 1)
+        self._signature = None
+
+    def update_workflow(self, events, acquisition=None):
+        events = list(events)[-100:]
+        current = events[-1] if events else None
+        state = acquisition or {}
+        self.abort_button.setEnabled(bool(state.get("active")))
+        signature = (len(events), current.get("t_unix") if current else None,
+                     state.get("state"), state.get("frames"))
+        if signature == self._signature:
+            return
+        self._signature = signature
+        if current:
+            self.current.setText(f"{current['stage']} · {current['status']}")
+            self.progress.setValue(round(100 * current.get("progress", 0)))
+            lines = [
+                f"{time.strftime('%H:%M:%S', time.localtime(item.get('t_unix', 0)))}  "
+                f"{item.get('stage', '')} · {item.get('status', '')}  {item.get('message', '')}"
+                for item in events
+            ]
+            self.timeline.setPlainText("\n".join(lines))
+            self.timeline.verticalScrollBar().setValue(self.timeline.verticalScrollBar().maximum())
+        if state.get("active"):
+            self.current.setText(f"正在录制第 {state.get('recording_index')} 份 · {state.get('frames', 0)} 帧")

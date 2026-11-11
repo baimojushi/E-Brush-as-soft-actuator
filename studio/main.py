@@ -52,7 +52,8 @@ from responsive_workspace import ResponsiveWorkspace
 from quality_monitor import AcquisitionQualityMonitor
 from material_theme import apply_theme, PALETTES
 from studio_sections import SectionNavigation, VIEW_PRESETS
-from research_panels import AcquisitionQualityPanel, AgentAuditPanel, RCStudioHandoffPanel
+from research_panels import AcquisitionQualityPanel, AgentAuditPanel, RCStudioHandoffPanel, AgentWorkflowPanel
+from acquisition_session import AcquisitionSession
 from data_handoff import save_manifest
 from rcstudio_bridge import probe_rcstudio
 from PySide6 import QtCore,QtWidgets,QtGui
@@ -364,6 +365,8 @@ class Win(QtWidgets.QMainWindow):
 
         # Agent
         self.agent = AgentControl(ROOT/"runtime", a.agent_host, a.agent_port)
+        self.agent.session = AcquisitionSession(
+            self.br, ROOT, quality_provider=lambda: self.agent.state().get("acquisition_quality", {}))
         self._register_agent_commands()
         self.agent.start()
         self._last_agent_flush = 0
@@ -385,6 +388,8 @@ class Win(QtWidgets.QMainWindow):
         self.hallcalui = HallExtrinsicPanel()
         self.quality_panel = AcquisitionQualityPanel()
         self.audit_panel = AgentAuditPanel()
+        self.workflow_panel = _help_anchor(AgentWorkflowPanel(), 'eb.workflow.events')
+        self.workflow_panel.abortRequested.connect(self._abort_agent_recording)
         self.handoff_panel = RCStudioHandoffPanel()
         self.handoff_panel.probeRequested.connect(self._probe_rcstudio)
         self.handoff_panel.exportRequested.connect(self._export_handoff)
@@ -400,6 +405,7 @@ class Win(QtWidgets.QMainWindow):
             ("姿态映射校准", self.calui),
             ("霍尔外参标定", self.hallcalui),
             ("Agent 操作审计", self.audit_panel),
+            ("Agent 工作流", self.workflow_panel),
             ("RC Studio 数据交接", self.handoff_panel),
         ]
         central = QtWidgets.QWidget()
@@ -706,6 +712,24 @@ class Win(QtWidgets.QMainWindow):
         except (OSError, ValueError) as exc:
             QtWidgets.QMessageBox.warning(self, "生成移交清单失败", str(exc))
 
+    def _abort_agent_recording(self):
+        """GUI-local fallback stop, even when RC Studio or its Agent has stopped."""
+        state = self.agent.session.status()
+        if not state.get("active"):
+            return
+        response = QtWidgets.QMessageBox.question(
+            self, "终止原始日志录制",
+            "将关闭正在写入的采集日志并保留文件供诊断。请确认终止当前录制。")
+        if response != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        try:
+            result = self.agent.session.stop(workflow_id=state["workflow_id"], abort=True)
+            self.agent.event("capture_aborted_by_operator", workflow_id=state["workflow_id"],
+                             state=result["state"])
+            self.statusBar().showMessage("已终止 Agent 录制，原始文件已保留", 7000)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "终止录制未完成", str(exc))
+
     # ---- Responsive workspace & side docks ----
     def _toggle_sidebars(self):
         show = not (self._runtime_dock.isVisible() or self._mapper_dock.isVisible())
@@ -957,6 +981,7 @@ class Win(QtWidgets.QMainWindow):
         if now_ui - self._last_dashboard_update >= .45:
             self.quality_panel.update_snapshot(self._last_quality)
             self.audit_panel.update_events(self.agent.events)
+            self.workflow_panel.update_workflow(self.agent.workflow_events, self.agent.session.status())
             self.statusBar().showMessage(self._last_quality.get("summary", "等待观测"))
             self._last_dashboard_update = now_ui
         rs = {
@@ -977,6 +1002,7 @@ class Win(QtWidgets.QMainWindow):
         self.status.setPlainText(json.dumps(rs, ensure_ascii=False, indent=2))
         self.agent.publish("camera", rs["camera"])
         self.agent.publish("acquisition_quality", self._last_quality)
+        self.agent.publish("acquisition_session", self.agent.session.status())
         self.agent.publish("brush", {"port": self.br.port, "error": transport.get('error'),
                                       "streaming_data": transport.get('streaming_data'),
                                       "valid_data_frames": transport.get('valid_data_frames'),
@@ -1100,6 +1126,13 @@ class Win(QtWidgets.QMainWindow):
             self.status.setPlainText("SAM3 health ERROR: " + repr(e))
 
     def closeEvent(self, e):
+        current = self.agent.session.status()
+        if current.get("active"):
+            try:
+                self.agent.session.stop(workflow_id=current["workflow_id"], abort=True)
+                self.agent.event("capture_aborted_on_exit", workflow_id=current["workflow_id"])
+            except Exception:
+                pass
         if hasattr(self, "learning"):
             self.learning.shutdown()
         self._settings.setValue("ui/geometry", self.saveGeometry())
