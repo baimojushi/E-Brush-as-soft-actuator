@@ -60,7 +60,7 @@ class AcquisitionQualityMonitor:
                     not {"hall_stale", "hall_read_fail"} & drop else "无效或过期")
         if not streaming:
             severity = "waiting"
-            summary = "等待实时 BRUSH-V1 DATA 数据" if connected else "串口未连接"
+            summary = "等待实时毛笔采样数据" if connected else "毛笔设备未连接"
         elif imu != "有效 / 新鲜":
             severity, summary = "warning", "惯性数据有效性或新鲜度异常"
         elif hall != "有效 / 未标记过期":

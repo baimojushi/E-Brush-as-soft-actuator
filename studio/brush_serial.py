@@ -304,28 +304,129 @@ class RawLogger:
             pass
 
 
-def list_candidate_ports() -> List[Tuple[str, str]]:
-    """Return (device, description) for ports whose descriptors match a keyword.
+def _is_debug_descriptor(port) -> bool:
+    vid, pid = getattr(port, 'vid', None), getattr(port, 'pid', None)
+    return ((vid == 0x303A and pid == 0x1001) or
+            'bthenum' in str(getattr(port, 'hwid', '') or '').lower() or
+            '蓝牙' in str(getattr(port, 'description', '') or '') or
+            'bluetooth' in str(getattr(port, 'description', '') or '').lower())
 
-    Keywords cover:
-      - ESP32-S3 official USB-JTAG/Serial (espressif, jtag, uart)
-      - CP210x (cp210)
-      - WCH CH340 / CH343 (wch, ch340, ch343, 1a86 [CH343 VID hex])
-      - Generic USB-Serial adapters (usb serial, usb-uart)
-    """
-    if list_ports is None:
-        return []
-    candidates = []
-    for p in list_ports.comports():
-        desc = " ".join(filter(None, [p.description, p.manufacturer, p.product]))
+
+def is_debug_port(device: str) -> bool:
+    """Recognize C3 native USB debug port; explicit --port still overrides."""
+    return bool(list_ports and any(
+        p.device == device and _is_debug_descriptor(p)
+        for p in list_ports.comports()))
+
+
+def classify_candidates(ports) -> List[Tuple[str, str]]:
+    """Rank USB-UART bridges; never confuse the pen's C3 debug UART with S3."""
+    ranked = []
+    for p in ports:
+        if _is_debug_descriptor(p):
+            continue
+        vid, pid = getattr(p, 'vid', None), getattr(p, 'pid', None)
+        desc = ' '.join(filter(None, [getattr(p, 'description', None),
+                                      getattr(p, 'manufacturer', None),
+                                      getattr(p, 'product', None)]))
         low = desc.lower()
-        if any(k in low for k in (
-            "espressif", "cp210", "usb serial", "jtag", "uart",
-            "ch340", "ch343", "wch", "usb-uart",
-            "1a86",  # WCH CH343 VID hex
-        )):
-            candidates.append((p.device, desc))
-    return candidates
+        if vid == 0x1A86 and pid == 0x55D3 or 'ch343' in low:
+            rank = 0
+        elif vid == 0x1A86 and pid == 0x7523 or 'ch340' in low:
+            rank = 1
+        elif vid in (0x10C4, 0x0403) or 'cp210' in low or 'ftdi' in low:
+            rank = 2
+        elif any(term in low for term in ('wch', 'usb-uart', 'usb serial', 'jtag', 'uart')):
+            rank = 3
+        else:
+            continue
+        ranked.append((rank, str(p.device), desc))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [(device, desc) for _, device, desc in ranked]
+
+
+def list_candidate_ports() -> List[Tuple[str, str]]:
+    return classify_candidates(list_ports.comports()) if list_ports else []
+
+
+def decode_brush_data(v: Tuple, host_rx_ns: int, clock: ClockDiscipline,
+                  latest_health: Optional[dict] = None, latest_hello: Optional[dict] = None) -> dict:
+    (
+        frame_id, calibration_id,
+        sample_time_us, hall_time_us, imu_time_us,
+        device_status, drop_flags,
+        hx, hy, hz, ht,
+        hall_conv_status, hall_device_status, imu_status, _reserved,
+        imu_temp, gx, gy, gz, ax, ay, az,
+        qw, qx, qy, qz,
+    ) = v
+
+    if clock.synced:
+        sample_host_ns = clock.mcu_us_to_host_ns(sample_time_us)
+        hall_host_ns = clock.mcu_us_to_host_ns(hall_time_us) if hall_time_us else 0
+        imu_host_ns = clock.mcu_us_to_host_ns(imu_time_us) if imu_time_us else 0
+    else:
+        sample_host_ns = host_rx_ns
+        hall_host_ns = host_rx_ns if hall_time_us else 0
+        imu_host_ns = host_rx_ns if imu_time_us else 0
+
+    hall_variant = 0
+    if latest_health:
+        hall_variant = int(latest_health.get("hall_variant", 0) or 0)
+    if hall_variant not in HALL_LSB_PER_MT_BY_VARIANT and latest_hello:
+        hall_variant = int(latest_hello.get("hall_variant", 0) or 0)
+
+    hall_lsb_per_mT = HALL_LSB_PER_MT_BY_VARIANT.get(hall_variant)
+    bx_mT = hx / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
+    by_mT = hy / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
+    bz_mT = hz / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
+
+    return {
+        "frame_id": frame_id,
+        "calibration_id": calibration_id,
+        "sample_time_us": sample_time_us,
+        "hall_time_us": hall_time_us,
+        "imu_time_us": imu_time_us,
+        "sample_host_ns": sample_host_ns,
+        "hall_host_ns": hall_host_ns,
+        "imu_host_ns": imu_host_ns,
+        "host_rx_ns": host_rx_ns,
+        "clock_synced": clock.synced,
+        "sync_rtt_ms": clock.last_rtt_ns / 1e6 if math.isfinite(clock.last_rtt_ns) else math.nan,
+        "device_status": device_status,
+        "device_status_names": _bits(device_status, STATUS_BITS),
+        "drop_flags": drop_flags,
+        "drop_flag_names": _bits(drop_flags, DROP_BITS),
+
+        # 原始码
+        "hall_x_raw": hx, "hall_y_raw": hy, "hall_z_raw": hz, "hall_temp_raw": ht,
+        "hall_conv_status": hall_conv_status,
+        "hall_device_status": hall_device_status,
+        "imu_status": imu_status,
+        "imu_temp_raw": imu_temp,
+        "gyro_x_raw": gx, "gyro_y_raw": gy, "gyro_z_raw": gz,
+        "accel_x_raw": ax, "accel_y_raw": ay, "accel_z_raw": az,
+
+        # 工程量，全部可由原始码重新计算
+        "hall_variant": hall_variant,
+        "hall_lsb_per_mT": hall_lsb_per_mT if hall_lsb_per_mT else math.nan,
+        "bx_mT": bx_mT,
+        "by_mT": by_mT,
+        "bz_mT": bz_mT,
+        # MMC C3 sends magnetic conversions only; do not decode its
+        # unmeasured temperature field with TMAG5273's coefficients.
+        "hall_temp_C": (math.nan if hall_variant == 3 else
+                        HALL_TEMP_T0_C + (ht - HALL_TEMP_T0_RAW) / HALL_TEMP_LSB_PER_C),
+        "imu_temp_C": 25.0 + imu_temp / 256.0,
+        "gx_rad_s": gx * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
+        "gy_rad_s": gy * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
+        "gz_rad_s": gz * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
+        "ax_m_s2": ax * (ACCEL_MG_PER_LSB * 1e-3) * G0,
+        "ay_m_s2": ay * (ACCEL_MG_PER_LSB * 1e-3) * G0,
+        "az_m_s2": az * (ACCEL_MG_PER_LSB * 1e-3) * G0,
+        "q_w": qw, "q_x": qx, "q_y": qy, "q_z": qz,
+    }
+
 
 
 class BrushSerial:
@@ -378,6 +479,10 @@ class BrushSerial:
         self._logger_lock = threading.RLock()
         self._logger = RawLogger(raw_log_path) if raw_log_path else None
         self._recording_file = str(raw_log_path) if raw_log_path else None
+
+    @property
+    def connected(self) -> bool:
+        return bool(self._running and self.ser.is_open)
 
     def start(self) -> None:
         if self._running:
@@ -653,81 +758,8 @@ class BrushSerial:
                         pass
 
     def _decode_data(self, v: Tuple, host_rx_ns: int) -> dict:
-        (
-            frame_id, calibration_id,
-            sample_time_us, hall_time_us, imu_time_us,
-            device_status, drop_flags,
-            hx, hy, hz, ht,
-            hall_conv_status, hall_device_status, imu_status, _reserved,
-            imu_temp, gx, gy, gz, ax, ay, az,
-            qw, qx, qy, qz,
-        ) = v
-
-        if self.clock.synced:
-            sample_host_ns = self.clock.mcu_us_to_host_ns(sample_time_us)
-            hall_host_ns = self.clock.mcu_us_to_host_ns(hall_time_us) if hall_time_us else 0
-            imu_host_ns = self.clock.mcu_us_to_host_ns(imu_time_us) if imu_time_us else 0
-        else:
-            sample_host_ns = host_rx_ns
-            hall_host_ns = host_rx_ns if hall_time_us else 0
-            imu_host_ns = host_rx_ns if imu_time_us else 0
-
-        hall_variant = 0
-        if self.latest_health:
-            hall_variant = int(self.latest_health.get("hall_variant", 0) or 0)
-        if hall_variant not in HALL_LSB_PER_MT_BY_VARIANT and self.latest_hello:
-            hall_variant = int(self.latest_hello.get("hall_variant", 0) or 0)
-
-        hall_lsb_per_mT = HALL_LSB_PER_MT_BY_VARIANT.get(hall_variant)
-        bx_mT = hx / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
-        by_mT = hy / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
-        bz_mT = hz / hall_lsb_per_mT if hall_lsb_per_mT else math.nan
-
-        return {
-            "frame_id": frame_id,
-            "calibration_id": calibration_id,
-            "sample_time_us": sample_time_us,
-            "hall_time_us": hall_time_us,
-            "imu_time_us": imu_time_us,
-            "sample_host_ns": sample_host_ns,
-            "hall_host_ns": hall_host_ns,
-            "imu_host_ns": imu_host_ns,
-            "host_rx_ns": host_rx_ns,
-            "clock_synced": self.clock.synced,
-            "sync_rtt_ms": self.clock.last_rtt_ns / 1e6 if math.isfinite(self.clock.last_rtt_ns) else math.nan,
-            "device_status": device_status,
-            "device_status_names": _bits(device_status, STATUS_BITS),
-            "drop_flags": drop_flags,
-            "drop_flag_names": _bits(drop_flags, DROP_BITS),
-
-            # 原始码
-            "hall_x_raw": hx, "hall_y_raw": hy, "hall_z_raw": hz, "hall_temp_raw": ht,
-            "hall_conv_status": hall_conv_status,
-            "hall_device_status": hall_device_status,
-            "imu_status": imu_status,
-            "imu_temp_raw": imu_temp,
-            "gyro_x_raw": gx, "gyro_y_raw": gy, "gyro_z_raw": gz,
-            "accel_x_raw": ax, "accel_y_raw": ay, "accel_z_raw": az,
-
-            # 工程量，全部可由原始码重新计算
-            "hall_variant": hall_variant,
-            "hall_lsb_per_mT": hall_lsb_per_mT if hall_lsb_per_mT else math.nan,
-            "bx_mT": bx_mT,
-            "by_mT": by_mT,
-            "bz_mT": bz_mT,
-            # MMC C3 sends magnetic conversions only; do not decode its
-            # unmeasured temperature field with TMAG5273's coefficients.
-            "hall_temp_C": (math.nan if hall_variant == 3 else
-                            HALL_TEMP_T0_C + (ht - HALL_TEMP_T0_RAW) / HALL_TEMP_LSB_PER_C),
-            "imu_temp_C": 25.0 + imu_temp / 256.0,
-            "gx_rad_s": gx * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
-            "gy_rad_s": gy * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
-            "gz_rad_s": gz * (GYRO_MDPS_PER_LSB * 1e-3) * math.pi / 180.0,
-            "ax_m_s2": ax * (ACCEL_MG_PER_LSB * 1e-3) * G0,
-            "ay_m_s2": ay * (ACCEL_MG_PER_LSB * 1e-3) * G0,
-            "az_m_s2": az * (ACCEL_MG_PER_LSB * 1e-3) * G0,
-            "q_w": qw, "q_x": qx, "q_y": qy, "q_z": qz,
-        }
+        return decode_brush_data(v, host_rx_ns, self.clock,
+                                 self.latest_health, self.latest_hello)
 
     def drain(self, limit: int = 1000) -> List[dict]:
         if self.frames is None:
@@ -789,7 +821,7 @@ def active_probe(port: str, baud: int = 921600, timeout: float = 0.6) -> bool:
 
 def auto_detect_port(preferred_port: Optional[str] = None,
                      baud: int = 921600,
-                     verbose: bool = True) -> str:
+                     verbose: bool = True) -> Optional[str]:
     """Resolve a serial port.  Honors preferred_port; falls back to keyword + probe."""
     if preferred_port:
         try:
@@ -805,13 +837,9 @@ def auto_detect_port(preferred_port: Optional[str] = None,
 
     candidates = list_candidate_ports()
     if not candidates:
-        raise RuntimeError(
-            "No candidate ports found.  Plug in the ESP32-S3 and check the "
-            "CH343 driver.  All visible ports:\n  "
-            + "\n  ".join(
-                f"{p.device} - {p.description}" for p in (list_ports.comports() if list_ports else [])
-            )
-        )
+        if verbose:
+            print('[WARN] No USB-UART bridge candidates; BLE mode is the default.')
+        return None
 
     if verbose:
         print(f"[INFO] Keyword candidates ({len(candidates)}):")
@@ -827,10 +855,9 @@ def auto_detect_port(preferred_port: Optional[str] = None,
                 print(f"  [HIT] {device}")
             return device
 
-    fallback = candidates[0][0]
     if verbose:
-        print(f"[WARN] No PING response. Falling back to first candidate: {fallback}")
-    return fallback
+        print('[WARN] No valid BRUSH-V1 PING response; refusing to guess a port.')
+    return None
 
 
 if __name__ == "__main__":

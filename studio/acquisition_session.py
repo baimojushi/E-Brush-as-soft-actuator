@@ -1,4 +1,4 @@
-"""Explicit acquisition sessions backed by the single E-Brush serial parser.
+"""Explicit acquisition sessions backed by the active E-Brush device receiver.
 
 Recording is bounded, starts only after a write-authorized operator action, and
 closes a real BRLOG file before generating the handoff manifest. The receiver

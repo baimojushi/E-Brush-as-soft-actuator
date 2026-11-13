@@ -4,7 +4,6 @@ import subprocess
 import sys
 import threading
 import time
-import serial
 
 
 class HP60CSource:
@@ -379,13 +378,19 @@ def auto_detect_port(verbose=False):
 
 
 class BrushSource:
-    """Studio's ONLY serial receiver: COBS/CRC32 BRUSH-V1, not line JSON.
+    """One brush source for PC-C3 BLE or backward-compatible S3 USB serial.
 
-    Exposes the same latest()/status()/close() interface used by main.py.
-    Extra S3 0x20/0x21 radio diagnostics are handled by the Wireless adapter.
+    Both receivers publish BRUSH-V1-compatible dictionaries to the existing
+    calibrator, RGB-D synchronizer, quality monitor and acquisition session.
     """
 
-    def __init__(self, root_dir, port=None, baud=921600, auto_reconnect=True):
+    def __init__(self, root_dir, port=None, baud=921600, auto_reconnect=True,
+                 transport='serial', ble_name='EBrush-C3', ble_address=None):
+        if transport not in ('ble', 'serial', 'wifi'):
+            raise ValueError('brush transport must be ble, wifi or serial')
+        self.transport = transport
+        self.ble_name = ble_name
+        self.ble_address = ble_address
         self.root_dir = Path(root_dir)
         self.port = port
         self._preferred_port = port
@@ -405,19 +410,29 @@ class BrushSource:
         path = str(self.root_dir / 'studio')
         if path not in sys.path:
             sys.path.insert(0, path)
+        if self.transport == 'ble':
+            from c3_direct import C3BleReceiver
+            return C3BleReceiver
+        if self.transport == 'wifi':
+            from c3_direct import C3WifiReceiver
+            return C3WifiReceiver
         from wireless_studio_adapter import WirelessBrushSerial
         return WirelessBrushSerial
 
     def _connect_brush(self):
         decoder = self._prepare_imports()
-        if not self.port:
-            self.port = auto_detect_port(verbose=True)
-        if not self.port:
-            raise RuntimeError('未检测到支持 BRUSH-V1 的 ESP32-S3 串口')
         if self._stop_reconnect.is_set():
-            raise RuntimeError('串口连接已取消')
-
-        receiver = decoder(self.port, self.baud, queue_size=0)
+            raise RuntimeError('连接已取消')
+        if self.transport == 'ble':
+            receiver = decoder(name=self.ble_name, address=self.ble_address)
+        elif self.transport == 'wifi':
+            receiver = decoder()
+        else:
+            if not self.port:
+                self.port = auto_detect_port(verbose=True)
+            if not self.port:
+                raise RuntimeError('未检测到支持 BRUSH-V1 的 ESP32-S3 串口')
+            receiver = decoder(self.port, self.baud, queue_size=0)
         try:
             receiver.start()
         except Exception:
@@ -427,11 +442,11 @@ class BrushSource:
             old = self.bs
             self.bs = receiver
             self.error = ''
-            self._ever_connected = True
+            self._ever_connected = self._ever_connected or bool(receiver.connected)
             self._reconnect_backoff = 1.0
         if old is not None:
             old.close()
-        print(f'[BRUSH] BRUSH-V1 binary parser active: {self.port} @ {self.baud}')
+        print(f'[BRUSH] {self.transport} receiver started: {receiver.port}')
 
     def start(self):
         self._stop_reconnect.clear()
@@ -458,7 +473,8 @@ class BrushSource:
                 continue
             with self._lock:
                 receiver = self.bs
-            if receiver is not None and receiver.ser.is_open and receiver._running:
+            if receiver is not None and receiver._running and (
+                    receiver.connected or getattr(receiver, 'connecting', False)):
                 continue
             try:
                 if receiver is not None:
@@ -467,7 +483,7 @@ class BrushSource:
                         if self.bs is receiver:
                             self.bs = None
                 # Auto detected ports may change after a USB unplug/replug.
-                if self._preferred_port is None:
+                if self.transport == 'serial' and self._preferred_port is None:
                     self.port = None
                 self._connect_brush()
             except Exception as exc:
@@ -483,7 +499,7 @@ class BrushSource:
             if self._recording_receiver is not None:
                 raise RuntimeError("采集正在进行")
             receiver = self.bs
-            if not receiver or not receiver.ser.is_open or not receiver._running:
+            if not receiver or not receiver.connected:
                 raise RuntimeError("设备尚未连接，无法录制")
             before = receiver.start_recording(path)
             self._recording_receiver = receiver
@@ -495,7 +511,7 @@ class BrushSource:
             receiver = self._recording_receiver
             if receiver is None:
                 return {"active": False, "frames": 0}
-            connected = bool(receiver is self.bs and receiver.ser.is_open and receiver._running)
+            connected = bool(receiver is self.bs and receiver.connected)
             frames = max(0, int(receiver.stats.get("data_frames", 0)) - self._recording_start_frames)
             return {"active": True, "connected": connected, "frames": frames,
                     "interrupted": not connected}
@@ -507,7 +523,7 @@ class BrushSource:
                 raise RuntimeError("当前没有录制会话")
             stopped = receiver.stop_recording()
             stopped["frames"] = max(0, stopped["data_frames"] - self._recording_start_frames)
-            stopped["interrupted"] = bool(receiver is not self.bs or not receiver._running)
+            stopped["interrupted"] = bool(receiver is not self.bs or not receiver.connected)
             return stopped
 
     def latest(self):
@@ -527,7 +543,11 @@ class BrushSource:
             reconnect = self.auto_reconnect
             backoff = self._reconnect_backoff
 
-        connected = bool(receiver and receiver.ser.is_open and receiver._running)
+        connected = bool(receiver and receiver.connected)
+        if connected:
+            with self._lock:
+                self._ever_connected = True
+            ever = True
         latest = receiver.latest if receiver else None
         frame_count = int(receiver.stats.get('data_frames', 0)) if receiver else 0
         age_s = ((time.perf_counter_ns() - latest['host_rx_ns']) / 1e9
@@ -537,12 +557,19 @@ class BrushSource:
         protocol_error = str(getattr(receiver, 'last_protocol_error', '') or '') if receiver else ''
         io_error = str(getattr(receiver, 'last_io_error', '') or '') if receiver else ''
         return {
-            'connected': connected,  # the port is open, not proof of valid packets
+            'connected': connected,  # radio/USB connected, not proof of valid packets
             'streaming_data': streaming,  # recent CRC-checked DATA frames
             'valid_data_frames': frame_count,
             'last_data_age_s': round(age_s, 3) if age_s is not None else None,
-            'decoder': 'BRUSH-V1 COBS/CRC32',
-            'port': port, 'ever_connected': ever,
+            'decoder': ('EBrushLink CRC16 -> BRUSH-V1' if self.transport != 'serial'
+                        else 'BRUSH-V1 COBS/CRC32'),
+            'transport': self.transport,
+            'port': (receiver.port if receiver else
+                     f'BLE:{self.ble_address or self.ble_name}' if self.transport == 'ble' else
+                     f'UDP:0.0.0.0:5568' if self.transport == 'wifi' else port),
+            'time_sync_available': bool(getattr(receiver, 'time_sync_available', False)),
+            'clock_synced': bool(latest and latest.get('clock_synced')),
+            'ever_connected': ever,
             'auto_reconnect': reconnect, 'reconnect_backoff': backoff,
             'error': error or io_error or protocol_error,
             'parser_stats': parser_stats,
@@ -550,6 +577,21 @@ class BrushSource:
             'health': dict(receiver.latest_health) if receiver and receiver.latest_health else None,
             'link': dict(receiver.latest_link) if receiver and receiver.latest_link else None,
         }
+
+    def switch_transport(self, transport):
+        """Change link mode without replacing BrushSource referenced by sessions."""
+        if transport not in ('ble', 'serial', 'wifi'):
+            raise ValueError('Unsupported transport')
+        if transport == self.transport:
+            return
+        with self._lock:
+            if self._recording_receiver is not None:
+                raise RuntimeError('录制过程中不能切换设备连接方式')
+        self.close()
+        self.transport = transport
+        if transport == 'serial':
+            self.port = self._preferred_port
+        self.start()
 
     def close(self):
         self._stop_reconnect.set()

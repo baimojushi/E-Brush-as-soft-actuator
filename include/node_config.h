@@ -58,13 +58,23 @@ constexpr uint8_t HALL_AVG_CODE = 5;  // 32 averages: restores 1-LSB granularity
 constexpr uint8_t HALL_ADDRS[] = {0x30, 0x35, 0x22, 0x78, 0x44};
 constexpr size_t HALL_ADDR_COUNT = sizeof(HALL_ADDRS) / sizeof(HALL_ADDRS[0]);
 
+// PC hotspot fallback is a separate C3 build; original S3 AP mode remains intact.
+#ifdef EBRUSH_WIFI_PC_DIRECT
+constexpr const char* WIFI_SSID = "EBrush-PC";
+constexpr uint8_t WIFI_HOST_IP[4] = {192, 168, 137, 1};
+#else
 constexpr const char* WIFI_SSID = "EBrush-S3";
+constexpr uint8_t WIFI_HOST_IP[4] = {192, 168, 4, 1};
+#endif
 #ifndef EBRUSH_WIFI_PASSWORD
 #define EBRUSH_WIFI_PASSWORD "Change-Me-Now-2026"
 #endif
 constexpr const char* WIFI_PASSWORD = EBRUSH_WIFI_PASSWORD;
 constexpr uint16_t WIFI_PORT = 5568;
+constexpr uint16_t WIFI_SYNC_PORT = 5569;
 constexpr const char* BLE_NAME = "EBrush-C3";
 constexpr const char* BLE_SERVICE = "8b962400-dad0-45a8-a8d5-4f45fd83aefe";
 constexpr const char* BLE_DATA_CHAR = "8b962401-dad0-45a8-a8d5-4f45fd83aefe";
+// Optional v2 PC-direct NTP-style sync: write 4-byte nonce, notify 20 bytes.
+constexpr const char* BLE_TIME_CHAR = "8b962402-dad0-45a8-a8d5-4f45fd83aefe";
 }  // namespace NodeConfig

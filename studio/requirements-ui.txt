@@ -6,4 +6,5 @@ PyOpenGL>=3.1.7
 numpy>=1.26,<2.3
 opencv-python>=4.8,<5
 pyserial>=3.5,<4
+bleak>=0.22,<3  # PC-side C3 direct Bluetooth LE
 requests>=2.31,<3

@@ -318,7 +318,8 @@ class Win(QtWidgets.QMainWindow):
                               auto_reconnect=a.camera_reconnect,
                               auto_start_supervisor=a.camera_supervisor)
         self.hp.start()
-        self.br = BrushSource(ROOT.parent, a.port, a.baud)
+        self.br = BrushSource(ROOT, a.port, a.baud, transport=a.brush_transport,
+                              ble_name=a.ble_name, ble_address=a.ble_address)
         if not a.no_brush:
             self.br.start()
 
@@ -485,12 +486,25 @@ class Win(QtWidgets.QMainWindow):
         f.addWidget(QtWidgets.QLabel("—— 深度图色彩映射 ——"))
         f.addWidget(self.colormap_panel)
 
-        # Brush serial reconnection panel
-        self.brush_panel = _help_anchor(QtWidgets.QGroupBox("毛笔串口重连"), 'eb.serial')
+        # Choose between default C3 BLE direct link and legacy S3 USB.
+        self.brush_panel = _help_anchor(QtWidgets.QGroupBox("毛笔连接 / 重连"), 'eb.serial')
         self.brush_panel.setStyleSheet("font-weight:600; font-size:12px;")
         bl = QtWidgets.QVBoxLayout(self.brush_panel)
         bl.setContentsMargins(8, 8, 8, 8)
         bl.setSpacing(6)
+
+        mode_row = QtWidgets.QWidget()
+        mode_layout = QtWidgets.QHBoxLayout(mode_row)
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.addWidget(QtWidgets.QLabel("连接方式"))
+        self.brush_mode_combo = QtWidgets.QComboBox()
+        self.brush_mode_combo.addItem("C3 · 蓝牙直连", "ble")
+        self.brush_mode_combo.addItem("C3 · Wi-Fi 热点（回退）", "wifi")
+        self.brush_mode_combo.addItem("S3 · USB 串口（兼容）", "serial")
+        self.brush_mode_combo.setCurrentIndex(('ble', 'wifi', 'serial').index(self.br.transport))
+        self.brush_mode_combo.currentIndexChanged.connect(self._switch_brush_transport)
+        mode_layout.addWidget(self.brush_mode_combo, 1)
+        bl.addWidget(mode_row)
 
         self.brush_status_lbl = QtWidgets.QLabel("状态: 检测中...")
         self.brush_status_lbl.setStyleSheet("font-size:12px;")
@@ -777,13 +791,19 @@ class Win(QtWidgets.QMainWindow):
                 f"状态: 已收到合法 DATA ✓ ({s.get('valid_data_frames', 0)} 帧)")
             color = PALETTES[self._theme_mode]['success']
         elif connected:
-            self.brush_status_lbl.setText('状态: 串口已打开，但尚无有效 DATA ⚠')
+            self.brush_status_lbl.setText('状态: 设备已连接，但尚无有效 DATA ⚠')
             color = PALETTES[self._theme_mode]['warning']
         else:
             self.brush_status_lbl.setText('状态: 未连接 ✗')
             color = PALETTES[self._theme_mode]['error']
         self.brush_status_lbl.setStyleSheet(f'font-size:12px; color:{color};')
-        self.brush_port_lbl.setText(f"端口: {s.get('port') or '未检测到'} | {s.get('decoder')}")
+        mode_desc = {'ble': 'C3 BLE', 'wifi': 'C3 Wi-Fi', 'serial': 'S3 USB'}.get(
+            s.get('transport'), '未知模式')
+        sync_desc = ('已同步' if s.get('clock_synced') else
+                     '未同步（相机对齐不可用）' if s.get('time_sync_available') else
+                     '暂不支持 BLE 对时' if s.get('transport') == 'ble' else '待验证')
+        self.brush_port_lbl.setText(
+            f"设备: {mode_desc} · {s.get('port') or '未检测到'} | 时钟: {sync_desc}")
         self.brush_port_lbl.setToolTip(
             f"错误: {s.get('error') or 'none'}\n统计: {s.get('parser_stats', {})}")
         self.chk_auto_reconnect.blockSignals(True)
@@ -809,9 +829,22 @@ class Win(QtWidgets.QMainWindow):
                 f"accel_raw=[{b.get('accel_x_raw')}, {b.get('accel_y_raw')}, {b.get('accel_z_raw')}]\n"
                 f"bits={flags}")
         else:
-            msg = s.get('error') or ('没有新数据，检查端口/二进制协议/固件')
+            msg = s.get('error') or ('没有新数据，检查 BLE/UDP/串口、传感器及固件')
             self.brush_hall_lbl.setText('Hall: ' + msg)
-            self.brush_imu_lbl.setText('IMU: 等待有效 BRUSH-V1 DATA 帧')
+            self.brush_imu_lbl.setText('IMU: 等待有效采样数据')
+
+    def _switch_brush_transport(self, _index):
+        mode = self.brush_mode_combo.currentData()
+        if mode == self.br.transport:
+            return
+        try:
+            self.br.switch_transport(mode)
+        except Exception as exc:
+            self.brush_mode_combo.blockSignals(True)
+            self.brush_mode_combo.setCurrentIndex(('ble', 'wifi', 'serial').index(self.br.transport))
+            self.brush_mode_combo.blockSignals(False)
+            self.brush_status_lbl.setText(f"切换连接方式失败: {exc}")
+        self._update_brush_status()
 
     def _manual_brush_reconnect(self):
         if hasattr(self, 'br') and self.br:
@@ -826,7 +859,7 @@ class Win(QtWidgets.QMainWindow):
             if checked:
                 self.br._start_reconnect_thread()
             else:
-                self.br._stop_reconnect = True
+                self.br._stop_reconnect.set()
 
     # ---- Agent commands ----
     def _register_agent_commands(self):
@@ -1153,7 +1186,11 @@ def main():
                    help="Keep retrying the HP60C camera in the background after a failure")
     p.add_argument("--camera-supervisor", action=argparse.BooleanOptionalAction, default=True,
                    help="Start the HP60C v13 supervisor when its shared memory is missing")
-    p.add_argument("--port")
+    p.add_argument("--brush-transport", choices=["ble", "wifi", "serial"], default="ble",
+                   help="Direct C3 BLE (default) or original S3 USB bridge")
+    p.add_argument("--ble-name", default="EBrush-C3")
+    p.add_argument("--ble-address", help="Optional BLE device address / WinRT device identifier")
+    p.add_argument("--port", help="Legacy S3 serial port, e.g. COM7")
     p.add_argument("--baud", type=int, default=921600)
     p.add_argument("--heading-mode", choices=["startup_reference", "relative", "calibration_session"], default="startup_reference")
     p.add_argument("--auto-restore-reference", action=argparse.BooleanOptionalAction, default=True,

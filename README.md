@@ -1,8 +1,18 @@
+# 2026-11 · C3 → Studio 直连（默认取消 S3 中继）
+
+现在默认硬件方案为 **ESP32-C3（笔端传感器）→ BLE → 电脑 Studio（接收、时钟、Mahony、滤波、标定与录制）**。ESP32-S3 USB 中继仍作为可选兼容与 A/B 对照保留，不是正常运行的必需硬件。Wi-Fi 备用提供独立的 C3-PC 热点固件 `c3_wifi_pc`。
+
+**从这里开始：** [C3 直连迁移与 Windows 烧录/验收说明](docs/C3_DIRECT_STUDIO_MIGRATION_CN.md)。在 Windows 先执行 `SETUP_STUDIO.ps1`，对 C3 烧录 `c3_ble`，然后运行 `RUN_STUDIO.bat`；Studio 默认扫描 `EBrush-C3`。旧 S3 使用 `RUN_STUDIO.bat --brush-transport serial --port COM7`（端口按实际修改）。
+
+> 本次已做离线回归，但尚未验证真实 Windows BLE 适配器、MTU、相机同步误差与 ESP32 硬件编译。原有 README 下文的“C3 → S3 → PC”段落保留为 **历史兼容架构** 的资料，不再是默认安装说明。
+
+---
+
 # E-Brush Studio V1.3 · Agent 设备采集与工作流展示
 
 E-Brush Studio 新增了经令牌授权的本机采集 API、独立 `.brlog` 录制启停、SHA-256 交接清单、质量门控、Agent 事件时间线以及本地紧急终止录制。通过 `workflow_id` 与 RC Studio V0.5 的研究工作流对应，原有设备、相机和标定由 E-Brush 统一管理。
 
-**从这里开始：** [双 Studio Agent 工作流使用说明](docs/AGENT_WORKFLOW_QUICKSTART_CN.md)。接入电子毛笔后执行 `START_AGENT_LIVE.ps1 -BrushPort COM7`；仅体验布局时继续使用 `START_UI_PREVIEW.ps1`。首次启动会在 `runtime/agent_credentials.json` 创建本机授权信息，供 RC Studio 使用。
+**从这里开始：** [双 Studio Agent 工作流使用说明](docs/AGENT_WORKFLOW_QUICKSTART_CN.md)。C3 直连时执行 `START_AGENT_LIVE.ps1`（默认 BLE）；旧 S3 串口才需要 `-BrushTransport serial -BrushPort COM7`。仅体验布局时使用 `START_UI_PREVIEW.ps1`。首次启动会在 `runtime/agent_credentials.json` 创建本机授权信息，供 RC Studio 使用。
 
 > 已完成模拟笔端与 RC 的 HTTP 工作流自动化联调。真实 COM、原生 PySide6 窗口和 Windows 多屏显示需在目标机器上验收。下文保留固件、传感器和原有实验平台的实施说明。
 

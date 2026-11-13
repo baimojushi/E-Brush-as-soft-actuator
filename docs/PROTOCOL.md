@@ -37,6 +37,28 @@ adapter, frame linking uses `frame_id`. Filtered Hall is *not* an externally
 calibrated absolute pressure measurement. Relative acceleration is useful
 for trails' intensity and stroke width, not absolute trajectory position.
 
+
+## 2026-11 PC direct protocol extension
+
+C3-to-PC **BLE** uses the unchanged radio service and data characteristic
+(`8b962400-dad0-45a8-a8d5-4f45fd83aefe` and
+`8b962401-dad0-45a8-a8d5-4f45fd83aefe`). The additional optional
+`BLE_TIME_CHAR = 8b962402-dad0-45a8-a8d5-4f45fd83aefe` supports a
+4-byte LE `nonce` write and a 20-byte packed LE `<IQQ` notify containing
+`nonce, c3_rx_us, c3_tx_us`, where both times come from the C3 monotonic
+`esp_timer_get_time()` clock. Roundtrips with adjusted RTT above 25ms are
+rejected. Studio never asserts synchronized camera timing until the 4-point
+clock fit succeeds and sync remains fresh. The same 4-byte request and 20-byte
+response are used for optional UDP 5569 PC hotspot Wi-Fi direct firmware.
+
+Host-side decoder keeps exactly the original 1..4-sample EBrushLink radio
+layout and CRC16. It exports the shared BRUSH-V1 decoded dictionary, adding
+filtered Hall, movement and link data without breaking the prior fields.
+`.brlog` direct recordings are **transcoded** BRUSH-V1 packets (DATA, HELLO,
+HEALTH and SYNC_RESP observations, not a raw BLE air capture), so the legacy
+parser and relative clock fit can replay them. To use the old C3-to-S3 route,
+select Studio `serial` transport; do not flash `c3_wifi_pc` for an S3 SoftAP.
+
 ### Radio reset handling
 
 C3 `boot_id` metadata detects restarts. S3 resets its sample sequence, C3

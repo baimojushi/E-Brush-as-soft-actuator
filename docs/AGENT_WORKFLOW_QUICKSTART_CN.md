@@ -13,7 +13,7 @@
 
 | E-Brush Studio · 127.0.0.1:8765 | RC Studio · 127.0.0.1:8766 |
 |---|---|
-| 唯一持有 USB/COM 接收器；负责数据采集、质量检测、标定与保存原始文件 | 负责创建实验工作流、验证移交清单、建立独立数据集、训练 ESN、计算评估指标 |
+| 唯一持有笔端接收通路（默认 BLE 直连，也可 S3 USB）；负责数据采集、质量检测、标定与保存原始文件 | 负责创建实验工作流、验证移交清单、建立独立数据集、训练 ESN、计算评估指标 |
 | 接收工作流事件，并在 GUI 展示当前录制及诊断 | 生成持久化事件日志、实验 ID 和模型；显示训练指标与基线 |
 | 发生故障时可在 E-Brush 本地 GUI 紧急终止录制 | 可取消等待中的工作流或训练任务；重新启动后标记未完成的工作流为 `interrupted` |
 
@@ -26,8 +26,10 @@
 ```powershell
 cd 'D:\Work\EBrush-Studio-v1.3-Agent-Workflow'
 powershell -ExecutionPolicy Bypass -File .\SETUP_STUDIO.ps1
-# 设备接入真实 COM7 时，启用采集与 Agent 服务；按实际端口修改 COM7。
-powershell -ExecutionPolicy Bypass -File .\START_AGENT_LIVE.ps1 -BrushPort COM7 -CameraBackend none
+# 默认 BLE 直连 ESP32-C3；无需插接 S3。
+powershell -ExecutionPolicy Bypass -File .\START_AGENT_LIVE.ps1 -CameraBackend none
+# 如需使用旧版 ESP32-S3 串口中继：
+# powershell -ExecutionPolicy Bypass -File .\START_AGENT_LIVE.ps1 -BrushTransport serial -BrushPort COM7 -CameraBackend none
 ```
 
 E-Brush 启动后，在 `runtime\agent_credentials.json` 自动生成只用于本机的读写令牌。请保护该文件；包含设备控制权限的 write_token 应仅授予可信本机软件。

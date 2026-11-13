@@ -2,8 +2,8 @@
 
 The original BRUSH-V1 DATA/HELLO/HEALTH remains byte-for-byte compatible.
 S3 emits extra packet types 0x20 (processed motion) and 0x21 (wireless health).
-The current Studio source tree was not included with this handoff: import
-WirelessBrushSerial instead of BrushSerial at its integration point.
+Studio ships in this project. This adapter is used only for legacy S3 USB
+transport; PC-direct BLE/Wi-Fi decodes radio packets in c3_direct.py.
 """
 from __future__ import annotations
 

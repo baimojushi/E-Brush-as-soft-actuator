@@ -16,3 +16,5 @@ c++ -std=c++17 -Wall -Wextra -Werror -Iinclude -Itests/mock_mmc_wire \
     tests/test_mmc5983ma.cpp lib/mmc5983ma/mmc5983ma.cpp -o "$BIN"
 "$BIN"
 python3 tests/test_python.py
+python3 tests/test_c3_direct.py
+python3 studio/tests/test_brush_port_detection.py

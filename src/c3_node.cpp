@@ -463,6 +463,16 @@ volatile bool ble_connected = false;
 volatile uint16_t ble_handle = 0xffff;
 NimBLECharacteristic* dataChar = nullptr;
 
+#pragma pack(push, 1)
+struct TimeResponse {
+  uint32_t nonce;
+  uint64_t c3_rx_us;
+  uint64_t c3_tx_us;
+};
+#pragma pack(pop)
+static_assert(sizeof(TimeResponse) == 20, "must fit the default ATT MTU of 23");
+
+
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& conn) override {
     ble_connected = true;
@@ -482,8 +492,28 @@ class CharCallbacks : public NimBLECharacteristicCallbacks {
     subscribed = (code & 1) != 0;
   }
 };
+class ClockCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& peer) override {
+    // The BLE stack owns the callback; do no blocking IO or sensor processing.
+    const uint64_t t_rx = static_cast<uint64_t>(esp_timer_get_time());
+    const std::string value = characteristic->getValue();
+    if (value.size() != sizeof(uint32_t)) return;
+    uint32_t nonce = 0;
+    memcpy(&nonce, value.data(), sizeof(nonce));
+    TimeResponse response{};
+    response.nonce = nonce;
+    response.c3_rx_us = t_rx;
+    response.c3_tx_us = static_cast<uint64_t>(esp_timer_get_time());
+    // A 20-byte reply also works when MTU=23; this does NOT solve the
+    // 60-byte minimum MTU needed for a normal C3 sample packet.
+    (void)characteristic->notify(
+        reinterpret_cast<const uint8_t*>(&response), sizeof(response),
+        peer.getConnHandle());
+  }
+};
 ServerCallbacks serverCallbacks;
 CharCallbacks charCallbacks;
+ClockCallbacks clockCallbacks;
 
 void initTransport() {
   Serial.println("  NimBLEDevice::init()...");
@@ -502,12 +532,20 @@ void initTransport() {
   dataChar = svc->createCharacteristic(BLE_DATA_CHAR, NIMBLE_PROPERTY::NOTIFY);
   Serial.println("  dataChar->setCallbacks()...");
   dataChar->setCallbacks(&charCallbacks);
+  NimBLECharacteristic* clockChar = svc->createCharacteristic(
+      BLE_TIME_CHAR, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+  clockChar->setCallbacks(&clockCallbacks);
   Serial.println("  svc->start()...");
   svc->start();
   Serial.println("  NimBLEDevice::getAdvertising()...");
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   Serial.println("  adv->addServiceUUID()...");
   adv->addServiceUUID(BLE_SERVICE);
+  // NimBLE-Arduino 2.x does NOT advertise the GATT device name by default.
+  // Both the 128-bit UUID and the local name may not fit the 31-byte primary
+  // ADV frame; put the name in the scan response for PC Bleak name discovery.
+  adv->enableScanResponse(true);
+  adv->setName(BLE_NAME);
   Serial.println("  adv->setMinInterval(160), setMaxInterval(240)...");
   adv->setMinInterval(160);
   adv->setMaxInterval(240);
@@ -541,6 +579,18 @@ bool transportSend(const uint8_t* bytes, size_t len) {
 #elif defined(BRUSH_LINK_WIFI)
 WiFiUDP udp;
 uint32_t wifi_retry_at = 0;
+#ifdef EBRUSH_WIFI_PC_DIRECT
+WiFiUDP timeUdp;
+bool time_udp_started = false;
+#pragma pack(push, 1)
+struct WifiTimeResponse {
+  uint32_t nonce;
+  uint64_t c3_rx_us;
+  uint64_t c3_tx_us;
+};
+#pragma pack(pop)
+static_assert(sizeof(WifiTimeResponse) == 20, "UDP sync layout");
+#endif
 
 void initTransport() {
   WiFi.mode(WIFI_STA);
@@ -551,7 +601,18 @@ void initTransport() {
 }
 
 void manageTransport(uint32_t now) {
-  if (WiFi.status() == WL_CONNECTED) return;
+  if (WiFi.status() == WL_CONNECTED) {
+#ifdef EBRUSH_WIFI_PC_DIRECT
+    if (!time_udp_started) {
+      timeUdp.begin(WIFI_SYNC_PORT);
+      time_udp_started = true;
+    }
+#endif
+    return;
+  }
+#ifdef EBRUSH_WIFI_PC_DIRECT
+  if (time_udp_started) { timeUdp.stop(); time_udp_started = false; }
+#endif
   if (static_cast<int32_t>(now - wifi_retry_at) >= 0) {
     wifi_retry_at = now + 3000000u;
     WiFi.reconnect();
@@ -561,10 +622,33 @@ void manageTransport(uint32_t now) {
 bool transportReady() { return WiFi.status() == WL_CONNECTED; }
 size_t transportMaxPayload() { return MAX_PACKET; }
 bool transportSend(const uint8_t* bytes, size_t len) {
-  if (!transportReady() || !udp.beginPacket(IPAddress(192,168,4,1), WIFI_PORT)) return false;
+  if (!transportReady() || !udp.beginPacket(IPAddress(
+      WIFI_HOST_IP[0], WIFI_HOST_IP[1], WIFI_HOST_IP[2], WIFI_HOST_IP[3]), WIFI_PORT)) return false;
   if (udp.write(bytes, len) != len) { udp.endPacket(); return false; }
   return udp.endPacket() == 1;
 }
+#ifdef EBRUSH_WIFI_PC_DIRECT
+void processWifiTimeSync() {
+  if (!time_udp_started) return;
+  const int length = timeUdp.parsePacket();
+  if (length == 0) return;
+  const uint64_t t_rx = static_cast<uint64_t>(esp_timer_get_time());
+  if (length == 4) {
+    uint32_t nonce = 0;
+    if (timeUdp.read(reinterpret_cast<uint8_t*>(&nonce), sizeof(nonce)) == 4) {
+      WifiTimeResponse reply{};
+      reply.nonce = nonce;
+      reply.c3_rx_us = t_rx;
+      reply.c3_tx_us = static_cast<uint64_t>(esp_timer_get_time());
+      if (timeUdp.beginPacket(timeUdp.remoteIP(), timeUdp.remotePort())) {
+        (void)timeUdp.write(reinterpret_cast<const uint8_t*>(&reply), sizeof(reply));
+        (void)timeUdp.endPacket();
+      }
+    }
+  }
+  while (timeUdp.available() > 0) (void)timeUdp.read();
+}
+#endif
 #endif
 
 void maybeSend(uint32_t now) {
@@ -730,6 +814,9 @@ void loop() {
     sampleSensors(tick, overrun);
   }
   maybeSend(static_cast<uint32_t>(esp_timer_get_time()));
+#ifdef EBRUSH_WIFI_PC_DIRECT
+  processWifiTimeSync();
+#endif
   // Keep idle slots available to the BLE stack and Wi-Fi power-save logic.
   const uint32_t left = state.next_sample - static_cast<uint32_t>(esp_timer_get_time());
   if (left > 1800u && left < 100000u) delay(1);

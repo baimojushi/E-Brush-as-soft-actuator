@@ -2,18 +2,18 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string>
-namespace NIMBLE_PROPERTY { constexpr int NOTIFY = 1; }
+namespace NIMBLE_PROPERTY { constexpr int NOTIFY = 1; constexpr int WRITE = 2; }
 class NimBLEUUID { public: explicit NimBLEUUID(const char*){} };
 class NimBLEConnInfo { public: uint16_t getConnHandle(){return 1;} };
 class NimBLEServer;
 class NimBLEClient;
 class NimBLECharacteristic;
-class NimBLECharacteristicCallbacks { public: virtual ~NimBLECharacteristicCallbacks()=default; virtual void onSubscribe(NimBLECharacteristic*,NimBLEConnInfo&,uint16_t){} };
+class NimBLECharacteristicCallbacks { public: virtual ~NimBLECharacteristicCallbacks()=default; virtual void onSubscribe(NimBLECharacteristic*,NimBLEConnInfo&,uint16_t){} virtual void onWrite(NimBLECharacteristic*,NimBLEConnInfo&){} };
 class NimBLEServerCallbacks { public: virtual ~NimBLEServerCallbacks()=default; virtual void onConnect(NimBLEServer*,NimBLEConnInfo&){} virtual void onDisconnect(NimBLEServer*,NimBLEConnInfo&,int){} };
-class NimBLECharacteristic { public: void setCallbacks(NimBLECharacteristicCallbacks*){} bool notify(const uint8_t*,size_t,uint16_t=0){return true;} };
+class NimBLECharacteristic { public: void setCallbacks(NimBLECharacteristicCallbacks*){} std::string getValue(){return std::string(4, '\0');} bool notify(const uint8_t*,size_t,uint16_t=0){return true;} };
 class NimBLEService { public: NimBLECharacteristic* createCharacteristic(const char*,int){return nullptr;} void start(){} };
 class NimBLEServer { public: void setCallbacks(NimBLEServerCallbacks*,bool=false){}; NimBLEService* createService(const char*){return nullptr;} void updateConnParams(uint16_t,uint16_t,uint16_t,uint16_t,uint16_t){} uint16_t getPeerMTU(uint16_t){return 247;} bool setDataLen(uint16_t,uint16_t){return true;} };
-class NimBLEAdvertising { public: void addServiceUUID(const char*){} void setMinInterval(uint16_t){} void setMaxInterval(uint16_t){} bool isAdvertising(){return true;} };
+class NimBLEAdvertising { public: void addServiceUUID(const char*){} void enableScanResponse(bool){} bool setName(const std::string&){return true;} void setMinInterval(uint16_t){} void setMaxInterval(uint16_t){} bool isAdvertising(){return true;} };
 class NimBLEAdvertisedDevice { public: bool isAdvertisingService(const NimBLEUUID&)const{return true;} };
 class NimBLEScanCallbacks { public: virtual ~NimBLEScanCallbacks()=default; virtual void onResult(const NimBLEAdvertisedDevice*){} };
 class NimBLEScan { public: void setScanCallbacks(NimBLEScanCallbacks*,bool=false){} void setInterval(uint16_t){} void setWindow(uint16_t){} void setActiveScan(bool){} bool isScanning(){return true;} bool start(uint32_t){return true;} void stop(){} };
