@@ -7,6 +7,7 @@ source-switch state, and legacy-format file recordings.
 from __future__ import annotations
 
 import math
+import os
 from pathlib import Path
 import struct
 import sys
@@ -217,7 +218,10 @@ class TestSourceAndRecording(unittest.TestCase):
             receiver.decoder.accept_packet(packet(num=4))
             stop = receiver.stop_recording()
             self.assertEqual(stop['data_frames'], 4)
-            self.assertEqual(stop['path'], str(path))
+            # Windows Path.resolve() may yield the 8.3 short-name form for
+            # temp dirs (e.g. ADMINI~1 vs Administrator); compare by the
+            # underlying filesystem object instead of the literal string.
+            self.assertTrue(os.path.samefile(stop['path'], path))
             raw = path.read_bytes()
             self.assertTrue(raw.startswith(b'BRUSH_BRL1\n'))
             offset = len(b'BRUSH_BRL1\n')
@@ -250,7 +254,9 @@ class TestSourceAndRecording(unittest.TestCase):
             second = Path(tmp) / 'second.brlog'
             receiver.start_recording(second)
             receiver.close()
-            self.assertEqual(receiver.stop_recording()['path'], str(second))
+            # compare by filesystem object: Path.resolve() may return the
+            # Windows 8.3 short-name form for temp dirs (ADMINI~1 vs Administrator)
+            self.assertTrue(os.path.samefile(receiver.stop_recording()['path'], second))
             self.assertTrue(second.is_file())
 
 
