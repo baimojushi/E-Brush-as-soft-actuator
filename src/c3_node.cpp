@@ -56,10 +56,6 @@ struct SensorState {
   uint32_t next_meta = 0;
   uint32_t last_sample_tick = 0;
   uint32_t recover_bits = 0;
-  // ★ 低功耗待机: 上次检测到"大幅度运动"的时间; 超过 STANDBY_IDLE_US
-  //    无运动则进入深度睡眠, 按 RST 键硬件复位即可恢复工作。
-  uint32_t motion_standby_at = 0;
-  int16_t prev_ax = 0, prev_ay = 0, prev_az = 0;  // 上一采样加速度
   Tmag5273::Sample h{};
   Lsm6dsr::Sample i{};
 
@@ -436,21 +432,6 @@ void sampleSensors(uint32_t scheduled, bool overrun) {
   out.az = state.i.az_raw;
   out.imu_status = state.i.status;
 
-  // ★ 低功耗待机: 用 IMU 加速度相邻采样差判断"大幅度运动"。
-  //    运动笔写时加速度变化远大于噪声(> MOTION_DELTA_LSB),
-  //    静置时差值接近 0。一旦连续 5 分钟无运动 → 进入深度睡眠。
-  if (state.imu_ready) {
-    const int16_t dax = abs(state.i.ax_raw - state.prev_ax);
-    const int16_t day = abs(state.i.ay_raw - state.prev_ay);
-    const int16_t daz = abs(state.i.az_raw - state.prev_az);
-    state.prev_ax = state.i.ax_raw;
-    state.prev_ay = state.i.ay_raw;
-    state.prev_az = state.i.az_raw;
-    if (dax > MOTION_DELTA_LSB || day > MOTION_DELTA_LSB || daz > MOTION_DELTA_LSB) {
-      state.motion_standby_at = static_cast<uint32_t>(esp_timer_get_time());
-    }
-  }
-
   // Per-sample Serial prints were removed: at 200 Hz a single printf takes
   // ~4 ms on the 115200 debug port and starved sampling/BLE notifications.
 
@@ -782,24 +763,6 @@ void setup() {
 
 void loop() {
   uint32_t now = static_cast<uint32_t>(esp_timer_get_time());
-  // ★ 低功耗待机: 连续 5 分钟无大幅度运动 → 深度睡眠。
-  //    按 RST 键硬件复位即可恢复工作 (传感器/BLE 全停, 电流 ~μA)。
-  if (state.motion_standby_at &&
-      static_cast<uint32_t>(now - state.motion_standby_at) >= STANDBY_IDLE_US) {
-    Serial.println("\n=== STANDBY: 5min idle, entering deep sleep ===");
-    Serial.flush();
-    // 关闭传感器总线与 BLE, 让电流降至 μA 级。
-    hallBus.end();
-    imuBus.end();
-#if defined(BRUSH_LINK_BLE)
-    NimBLEDevice::deinit(true);
-#elif defined(BRUSH_LINK_WIFI)
-    WiFi.mode(WIFI_OFF);
-#endif
-    esp_deep_sleep_start();
-    return; // 深度睡眠后不会返回此处
-  }
-
   if (static_cast<int32_t>(now - next_led_toggle) >= 0) {
     led_state = !led_state;
     digitalWrite(LED_PIN, led_state);
