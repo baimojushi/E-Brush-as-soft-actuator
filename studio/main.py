@@ -962,8 +962,13 @@ class Win(QtWidgets.QMainWindow):
         if sr is not None and sr.frame_id != self.last_sam_result:
             self.last_sam_result = sr.frame_id
             if sr.mask is not None:
-                vp = self.vest.estimate(sr.mask, sr.camera_context)
+                vp = self.vest.estimate(sr.mask, sr.camera_context, paper_mask=sr.paper_mask)
                 d = {"sam_frame_id": sr.frame_id, "sam_score": sr.score, "sam_latency_ms": sr.latency_ms, "sam_error": sr.error}
+                if sr.paper_mask is not None:
+                    d["paper_score"] = sr.paper_score
+                    d["paper_present"] = True
+                else:
+                    d["paper_present"] = False
                 if vp:
                     d.update({k: v for k, v in vp.items() if k != "mask"})
                 pose = self.state.get("pose")
@@ -977,6 +982,8 @@ class Win(QtWidgets.QMainWindow):
                 self.last_validation = d
                 self.val.update_result(d)
                 txt = "axis cam " + np.array2string(vp["axis_camera"], precision=3) if vp and vp.get("ok") else "vision fit failed"
+                if sr.paper_mask is not None:
+                    txt += " | paper"
                 self.maskview.set(overlay(sr.camera_context.get("rgb"), sr.mask, txt))
             else:
                 self.last_validation = {"sam_frame_id": sr.frame_id, "sam_error": sr.error, "sam_latency_ms": sr.latency_ms}

@@ -109,15 +109,52 @@ class EBrushVisionCoordinator:
         status["sensor_fatal_error"]=self.sensor_fatal_error
         status["camera_geometry_verified"]=self.calibration.geometric_ready
         status["tracking_position_kind"]="visible_surface_robust_center_not_brush_tip"
+        # 纸面世界系（SAM3 在线派生）
+        paper_world=status.get("paper_world")
+        if paper_world is not None and not paper_world.get("is_stale"):
+            status["paper_world_frame_name"]="paper_sam3"
+            status["world_from_camera_source"]="sam3_paper_mask"
         return status
 
+    def reestimate_paper(self):
+        """手动重估入口：强制下次 SAM3 结果重新拟合纸面世界系（清除 stale 标记）。"""
+        self.pipeline._paper_world = None
+        log.info("Paper world frame cleared; next SAM3 result will refit")
+
     def visible_surface_world_proxy(self):
-        """For UI visualization only; never a certified brush tip coordinate."""
+        """For UI visualization only; never a certified brush tip coordinate.
+
+        优先使用 SAM3 纸面在线派生世界系；回退到静态 world_from_camera。
+        """
         track=self.pipeline.status()["latest_track"]
         if not track or track["state"] not in ("OBSERVED","PREDICTED"):
             return None
         position=track.get("camera_center_m")
-        if position is None or self.calibration.world_from_camera is None:
+        if position is None:
+            return None
+
+        # 优先：纸面世界系（在线派生）
+        paper_world=self.pipeline.paper_world()
+        if paper_world is not None and not paper_world.is_stale:
+            T=np.asarray(paper_world.world_from_camera(),dtype=np.float64)
+            xyz=(T[:3,:3] @ np.asarray(position) + T[:3,3]).tolist()
+            return {
+                "track_id":track["track_id"],
+                "source_camera_frame_id":track["camera_frame_id"],
+                "world_visible_surface_center_m":xyz,
+                "quality_state":track["state"],
+                "relative_confidence":track["confidence"],
+                "object_position_type":"visible_surface_robust_center",
+                "is_brush_tip":False,
+                "is_training_ground_truth":False,
+                "world_frame_name":"paper_sam3",
+                "world_from_camera_source":"sam3_paper_mask",
+                "paper_world_inlier_ratio":paper_world.inlier_ratio,
+                "paper_world_rms_m":paper_world.rms_m,
+            }
+
+        # 回退：静态标定 world_from_camera
+        if self.calibration.world_from_camera is None:
             return None
         T=np.asarray(self.calibration.world_from_camera,dtype=np.float64)
         xyz=(T[:3,:3] @ np.asarray(position) + T[:3,3]).tolist()
@@ -130,6 +167,8 @@ class EBrushVisionCoordinator:
             "object_position_type":"visible_surface_robust_center",
             "is_brush_tip":False,
             "is_training_ground_truth":False,
+            "world_frame_name":self.calibration.world_frame_name,
+            "world_from_camera_source":"static_calibration",
         }
 
     def close(self,timeout_s:float = 240):

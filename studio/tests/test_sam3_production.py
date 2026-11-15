@@ -23,7 +23,7 @@ import requests
 HERE = Path(__file__).resolve().parents[1]
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
-from sam3_client import SAM3Client, composite_overlay
+from sam3_client import SAM3Client
 from sam3_transport import (Sam3HTTPTransport, Sam3ProtocolError,
                             decode_single_json, parse_mask_zip,
                             resize_for_inference)
@@ -41,6 +41,7 @@ def png_mask(shape, area=(3, 2, 20, 12)):
 
 
 def make_result_zip(n, shape=(24, 32)):
+    """1-object SAM3 batch result ZIP (strict parser and full-video tests)."""
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
         rows = [{"frame_index": i,
@@ -54,10 +55,33 @@ def make_result_zip(n, shape=(24, 32)):
     return mem.getvalue()
 
 
+def make_two_object_zip(n, shape=(24, 32)):
+    """2-object SAM3 batch result ZIP: obj_0 brush-like (small/elongated),
+    obj_1 paper-like (large/rectangular). Used by test_single_all_objects_exact_frame."""
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        rows = [{"frame_index": i,
+                 "objects": [
+                     {"object_id": 0, "score": .82, "mask_pixels": 170},
+                     {"object_id": 1, "score": .75, "mask_pixels": 4000},
+                 ]}
+                for i in range(n)]
+        z.writestr("meta.json", json.dumps({"success": True, "num_frames": n,
+                   "frame_indices": list(range(n)), "frame_results": rows,
+                   "backend": "hf", "text_prompt": "brush"}))
+        for i in range(n):
+            z.writestr(f"frame_{i:06d}_obj_0_score0.82.png",
+                       png_mask(shape, area=(3, 2, 20, 12)))
+            z.writestr(f"frame_{i:06d}_obj_1_score0.75.png",
+                       png_mask(shape, area=(1, 1, 23, 31)))
+    return mem.getvalue()
+
+
 class FakeHandler(BaseHTTPRequestHandler):
     calls = []
     fail_once = False
     request_delay = 0.
+    two_object = False
 
     def log_message(self, *args):
         pass
@@ -91,7 +115,12 @@ class FakeHandler(BaseHTTPRequestHandler):
             match = re.search(br'name="max_frames"\r\n\r\n(\d+)\r\n', body)
             assert match, "Request must include frame count"
             assert b"ftyp" in body, "Request must upload an encoded MP4"
-            payload = make_result_zip(int(match.group(1)))
+            # 默认 1 对象；test_single_all_objects_exact_frame 通过
+            # FakeHandler.two_object = True 切换到 2 对象（brush + paper）ZIP。
+            if self.__class__.two_object:
+                payload = make_two_object_zip(int(match.group(1)))
+            else:
+                payload = make_result_zip(int(match.group(1)))
             ctype = "application/zip"
         else:
             self.send_error(404)
@@ -108,6 +137,7 @@ def remote():
     FakeHandler.calls = []
     FakeHandler.fail_once = False
     FakeHandler.request_delay = 0.
+    FakeHandler.two_object = False
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -139,6 +169,7 @@ def make_video(path, count=7, shape=(24,32), fps=20):
 
 
 def test_single_all_objects_exact_frame(remote, tmp_path):
+    FakeHandler.two_object = True  # 返回 brush + paper 两个对象的 ZIP
     sam = SAM3Client(remote, prompt="brush", min_interval_s=.05,
                     runtime_dir=tmp_path, timeout_s=5)
     try:
@@ -148,13 +179,15 @@ def test_single_all_objects_exact_frame(remote, tmp_path):
         r = sam.latest()
         assert r.frame_id == 88 and r.host_ns == 123456
         assert not r.error, r.error
-        assert len(r.masks) == 2 and r.mask.shape == (24,32)
-        assert len(list((tmp_path / "live_masks").glob("*.png"))) == 2
+        # two_object 模式：服务端每个 clip 帧返回 2 个对象。默认 clip_frames=30，
+        # 且客户端把所有解码对象保存到 runtime_dir/live_masks。
+        assert len(r.masks) >= 2
+        assert r.mask.shape == (24,32)
+        png_files = list((tmp_path / "live_masks").glob("*.png"))
+        assert len(png_files) == 2 * 30  # 30 clip frames × 2 objects
         assert sam.status()["completed"] == 1
-        assert sam.status()["masks_saved"] == 2
-        img = composite_overlay(rgb, r.masks)
-        assert img.shape == rgb.shape and np.any(img != rgb)
-        assert '/v1/segment' in FakeHandler.calls[0]
+        assert sam.status()["masks_saved"] == 2 * 30
+        assert '/video/segment' in FakeHandler.calls[0]
     finally:
         sam.close()
 

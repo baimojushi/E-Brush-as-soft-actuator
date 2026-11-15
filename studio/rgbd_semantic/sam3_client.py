@@ -33,6 +33,7 @@ class Sam3TransportConfig:
     base_url: str = "http://127.0.0.1:6014"
     api_key: str = ""
     prompt: str = "brush"
+    paper_prompt: str = ""  # 空=复合 prompt 模式；非空=双 prompt 模式（fallback）
     connect_timeout_s: float = 5.0
     read_timeout_s: float = 180.0
     max_zip_bytes: int = 100 * 1024 * 1024
@@ -209,16 +210,94 @@ class Sam3V4BatchClient:
                     out.write(cv2.cvtColor(f.color_rgb,cv2.COLOR_RGB2BGR))
             finally:
                 out.release()
-            return self.segment_video_file(
-                filename,
-                [FrameReference(f.camera_frame_id,f.calibration_id) for f in frames],
-                clip_id=clip_id,
-            )
+
+            # 复合 prompt 模式：prompt + paper_prompt 合并为单个 text_prompt
+            if self.cfg.paper_prompt:
+                # 双 prompt 模式：分别发两次请求，按 frame_index 合并
+                # （服务端恢复后若复合 prompt 不支持，走此 fallback）
+                result1 = self._segment_single_prompt(filename, [
+                    FrameReference(f.camera_frame_id, f.calibration_id) for f in frames
+                ], self.cfg.prompt, clip_id + "_brush")
+                result2 = self._segment_single_prompt(filename, [
+                    FrameReference(f.camera_frame_id, f.calibration_id) for f in frames
+                ], self.cfg.paper_prompt, clip_id + "_paper")
+                # 合并两个结果的掩码
+                merged_masks: dict[int, list[SegmentationMask]] = {}
+                for fid in result1.camera_frame_ids:
+                    merged_masks[fid] = list(result1.masks.get(fid, [])) + list(result2.masks.get(fid, []))
+                    for m in result1.masks.get(fid, []):
+                        m.label = "brush"
+                    for m in result2.masks.get(fid, []):
+                        m.label = "paper"
+                result = Sam3ClipResult(
+                    clip_id=clip_id,
+                    camera_frame_ids=result1.camera_frame_ids,
+                    masks=merged_masks,
+                    latency_ms=0.0,
+                    backend="dual-prompt",
+                    meta={"text_prompt": f"{self.cfg.prompt} + {self.cfg.paper_prompt}",
+                           "mode": "dual"},
+                )
+            else:
+                # 复合 prompt 模式：单次请求，text_prompt = prompt（服务端自行决定返回几个对象）
+                result = self.segment_video_file(
+                    filename,
+                    [FrameReference(f.camera_frame_id, f.calibration_id) for f in frames],
+                    clip_id=clip_id,
+                )
+                # 解析后做 label 分类
+                from .paper_frame import classify_brush_paper
+                for fid in result.masks:
+                    masks = result.masks[fid]
+                    if len(masks) >= 1:
+                        brush_idx, paper_idx, reasons = classify_brush_paper(masks)
+                        if brush_idx is not None:
+                            masks[brush_idx].label = "brush"
+                        if paper_idx is not None:
+                            masks[paper_idx].label = "paper"
+
+            result.latency_ms=(time.perf_counter()-started)*1000.
+            return result
         finally:
             try:
                 os.unlink(filename)
             except FileNotFoundError:
                 pass
+
+    def _segment_single_prompt(self, filename: str, frames: list[FrameReference],
+                                prompt: str, clip_id: str) -> Sam3ClipResult:
+        """用指定 prompt 发送一次 batch 请求，返回 Sam3ClipResult。"""
+        import requests
+        if not frames or len(frames)>self.cfg.max_clip_frames:
+            raise ValueError("SAM3 MP4 exceeds configured clip size")
+        ids=[f.camera_frame_id for f in frames]
+        if ids!=sorted(set(ids)):
+            raise ValueError("Duplicate/unordered original camera frame IDs")
+        for reference in frames:
+            reference.validate(self.calibration)
+        headers={"Authorization":f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
+        with requests.Session() as http:
+            http.trust_env=False
+            with open(filename,"rb") as fh:
+                resp=http.post(
+                    self.cfg.base_url.rstrip("/")+"/video/segment",
+                    headers=headers,
+                    files={"file":("episode_clip.mp4",fh,"video/mp4")},
+                    data={
+                        "text_prompt":prompt,
+                        "frame_stride":"1",
+                        "max_frames":str(len(frames)),
+                        "return_masks_png":"true",
+                        "output_prob_thresh":str(self.cfg.output_prob_thresh),
+                    },
+                    timeout=(self.cfg.connect_timeout_s,self.cfg.read_timeout_s),
+                )
+            resp.raise_for_status()
+        if len(resp.content)>self.cfg.max_zip_bytes:
+            raise Sam3ResponseError("SAM3 response exceeds ZIP size cap")
+        result=parse_sam3_zip(resp.content,frames,self.calibration,
+                              clip_id,self.cfg.max_zip_bytes,self.cfg.max_uncompressed_bytes)
+        return result
 
     def segment_video_file(self, filename: str, frames: list[FrameReference],
                            clip_id: str | None = None) -> Sam3ClipResult:

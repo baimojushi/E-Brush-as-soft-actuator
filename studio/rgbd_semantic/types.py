@@ -115,6 +115,7 @@ class SegmentationMask:
     source_clip_id: str
     clip_frame_index: int
     prompt: str = "brush"
+    label: str = ""  # "brush" | "paper" | ""（空=未分类）
 
     def validate(self, calib: CameraCalibration) -> None:
         if self.camera_frame_id < 0 or self.clip_frame_index < 0:

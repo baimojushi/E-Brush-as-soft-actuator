@@ -34,7 +34,7 @@ class VisionPoseEstimator:
         self.erode_px=int(erode_px);self.ransac_mm=float(ransac_mm);self.min_points=int(min_points)
         self.prev_axis=None
 
-    def estimate(self, mask, camera):
+    def estimate(self, mask, camera, paper_mask=None):
         if mask is None or camera is None:return None
         m=np.asarray(mask,bool)
         if self.erode_px>0:
@@ -63,10 +63,62 @@ class VisionPoseEstimator:
         if self.prev_axis is not None and np.dot(axis,self.prev_axis)<0:axis=-axis
         self.prev_axis=axis.copy()
         q=float(np.clip(fit["inlier_ratio"]*min(1,fit["visible_length_mm"]/100.0)*min(1,fit["eigen_ratio"]/8.0),0,1))
-        return {"ok":True,"axis_camera":axis,"origin_camera_mm":fit["origin"],"point_count":int(len(P)),
+        result={"ok":True,"axis_camera":axis,"origin_camera_mm":fit["origin"],"point_count":int(len(P)),
                 "depth_valid_ratio":depth_valid_ratio,"line_rms_mm":fit["line_rms_mm"],"inlier_ratio":fit["inlier_ratio"],
                 "visible_length_mm":fit["visible_length_mm"],"eigen_ratio":fit["eigen_ratio"],"vision_quality":q,
                 "mask":m}
+
+        # 纸面平面估计（如果提供了 paper_mask）
+        if paper_mask is not None and np.any(np.asarray(paper_mask,bool)):
+            paper_plane=self._estimate_paper_plane(paper_mask,camera)
+            if paper_plane is not None:
+                result["paper_plane"]=paper_plane
+                result["paper_center_camera_mm"]=[float(v) for v in paper_plane["p0"]]
+                result["world_frame"]={
+                    "z_axis_camera":paper_plane["n"],
+                    "origin_camera_mm":[float(v) for v in paper_plane["p0"]],
+                }
+        return result
+
+    def _estimate_paper_plane(self, paper_mask, camera):
+        """用 paper_mask + 相机深度估计纸面平面（RANSAC）。"""
+        pc=camera.get("pointcloud")
+        if pc is None:return None
+        pc=np.asarray(pc)
+        H,W=paper_mask.shape
+        if pc.ndim==2 and pc.shape[1]==3 and len(pc)==H*W:pc=pc.reshape(H,W,3)
+        if pc.ndim!=3 or pc.shape[:2]!=(H,W):return None
+        p_mask=np.asarray(paper_mask,bool)
+        p_pts=pc[p_mask]
+        finite=np.isfinite(p_pts).all(axis=1)&(np.linalg.norm(p_pts,axis=1)>1e-6)
+        p_pts=p_pts[finite]
+        if len(p_pts)<200:return None
+        scale=1000.0 if np.nanmedian(np.linalg.norm(p_pts,axis=1))<10 else 1.0
+        P=p_pts*scale  # 转为 mm
+
+        # RANSAC 平面拟合（3 点采样）
+        rng=np.random.default_rng(42)
+        threshold=5.0  # mm
+        best_n=None;best_count=0;best_inliers=None
+        for _ in range(200):
+            idx=rng.integers(0,len(P),3,replace=False)
+            p0,p1,p2=P[idx[0]],P[idx[1]],P[idx[2]]
+            n=np.cross(p1-p0,p2-p0)
+            norm_n=float(np.linalg.norm(n))
+            if norm_n<1e-9:continue
+            n=n/norm_n
+            d=float(np.dot(n,p0))
+            dists=np.abs(P@n-d)
+            inliers=dists<threshold
+            count=int(np.count_nonzero(inliers))
+            if count>best_count:
+                best_count=count;best_n=n;best_inliers=inliers
+        if best_n is None or best_count<50:return None
+        p0=np.median(P[best_inliers],axis=0)
+        rms=float(np.sqrt(np.mean((P[best_inliers]@best_n-p0@best_n)**2)))
+        if best_n[2]<0:best_n=-best_n
+        return {"n":[float(v) for v in best_n],"p0":[float(v) for v in p0],
+                "inlier_ratio":float(best_count/len(P)),"rms_mm":rms,"inliers":best_count}
 
 def compare_axes(imu_axis_board, vision_axis_camera, R_board_from_camera=None):
     """If camera->board is unknown, comparison is intentionally unavailable rather than silently mixing frames."""

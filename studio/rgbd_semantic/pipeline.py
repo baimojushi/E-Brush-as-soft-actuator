@@ -11,6 +11,7 @@ import time
 from typing import Callable
 
 from .dataset import EpisodeVisionWriter
+from .paper_frame import PaperWorldFrame, fit_paper_plane, paper_plane_to_world_frame
 from .sam3_client import Sam3V4BatchClient, best_unambiguous_brush
 from .sync import BrushTimestampBuffer
 from .tracking import RGBDLocalTracker
@@ -63,6 +64,8 @@ class RGBDSemanticPipeline:
         self._last_accepted_id=-1
         self._last_accepted_ts=0
         self._started=False
+        self._paper_world: PaperWorldFrame | None = None
+        self._paper_world_lock = threading.Lock()
 
     def start(self):
         with self._guard:
@@ -112,7 +115,8 @@ class RGBDSemanticPipeline:
             )
             s["recorder_queue_size"]=self.ingest.qsize()
             s["sam3_busy"]=bool(self._job is not None and not self._job.done())
-            return s
+        s["paper_world"]=self.paper_world().to_dict() if self.paper_world() is not None else None
+        return s
 
     def _run(self):
         while not self.stop_signal.is_set() or not self.ingest.empty() or self._job is not None:
@@ -173,6 +177,9 @@ class RGBDSemanticPipeline:
         try:
             result=job.result()
             best_recent=None
+            paper_mask_for_plane=None
+            paper_frame=None
+            brush_mask_for_plane=None
             for source_fid in result.camera_frame_ids:
                 archived=self.writer.read_frame(source_fid)
                 annotated=[]
@@ -185,6 +192,16 @@ class RGBDSemanticPipeline:
                 best,reason=best_unambiguous_brush(annotated)
                 if best is not None:
                     best_recent=(archived,best)
+                # 找到 paper 和 brush 掩码（按 label）
+                for mask in annotated:
+                    if mask.label == "paper" and paper_mask_for_plane is None:
+                        paper_mask_for_plane = mask
+                        paper_frame = archived
+                    elif mask.label == "brush" and brush_mask_for_plane is None:
+                        brush_mask_for_plane = mask
+            # 更新纸面世界系
+            if paper_mask_for_plane is not None:
+                self._update_paper_world(result, paper_mask_for_plane, brush_mask_for_plane, paper_frame)
             if best_recent is not None:
                 self._reseed_if_recent(*best_recent)
         except Exception as exc:
@@ -194,6 +211,44 @@ class RGBDSemanticPipeline:
             log.exception("SAM3 asynchronous annotation failure")
         finally:
             self._job=None
+
+    def _update_paper_world(self, result, paper_mask, brush_mask, paper_frame):
+        """从最新 SAM3 结果中提取纸掩码，拟合世界系。"""
+        try:
+            frame = paper_frame
+            if frame is None:
+                return
+            brush_mask_arr = brush_mask.mask if brush_mask else None
+            plane = fit_paper_plane(frame, paper_mask.mask, self.calib, brush_mask=brush_mask_arr)
+            if plane.get("status") != "CANDIDATE":
+                log.warning("Paper plane fit returned REVIEW: %s", plane.get("reasons"))
+                return
+            plane["paper_mask_frame_id"] = frame.camera_frame_id
+            plane["paper_clip_id"] = result.clip_id
+            plane["frame_timestamp_ns"] = frame.capture_host_ns
+            pframe = paper_plane_to_world_frame(plane, paper_mask.mask, self.calib)
+            if pframe is not None:
+                with self._paper_world_lock:
+                    self._paper_world = pframe
+                log.info("Paper world frame updated: frame_id=%d, inlier_ratio=%.2f, rms=%.4f m",
+                         frame.camera_frame_id, pframe.inlier_ratio, pframe.rms_m)
+        except Exception as exc:
+            log.warning("Paper world frame update failed: %s", exc)
+
+    def paper_world(self) -> PaperWorldFrame | None:
+        """返回当前纸面世界系（只读快照），或 None（尚未拟合/失败）。"""
+        with self._paper_world_lock:
+            if self._paper_world is not None:
+                # STALE 检测：纸面世界系超过 5 秒未更新视为 stale
+                import time
+                age_s = (time.perf_counter_ns() - self._paper_world.frame_timestamp_ns) / 1e9
+                if age_s > 5.0:
+                    self._paper_world.is_stale = True
+                    self._paper_world.stale_reason = f"STALE: {age_s:.1f}s since last fit"
+                else:
+                    self._paper_world.is_stale = False
+                    self._paper_world.stale_reason = ""
+            return self._paper_world
 
     def _reseed_if_recent(self, seed_frame, seed_mask):
         """Rewind a short local visual window; long-latency outputs remain archival only."""
